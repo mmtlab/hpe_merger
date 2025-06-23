@@ -29,30 +29,30 @@ This is a Filter plugin for [MADS](https://github.com/MADS-NET/MADS).
           |
           v
 +-------------------+
-|  load_data()      |<-------------------+
-| - Parse input     |                    |
-| - Update joint    |                    |
-|   positions,      |                    |
-|   covariances,    |                    |
-|   timestamps      |                    |
-+-------------------+                    |
-          |                              |
-          v                              |
-+-------------------+                    |
-|  process()        |                    |
-| - Predict current |                    |
-|   positions       |                    |
-| - Compute weights |                    |
-|   (time, cameras) |                    |
-| - Fuse positions  |                    |
-|   and covariances |                    |
-| - Estimate        |                    |
-|   velocities      |                    |
-+-------------------+                    |
-          |                              |
-          v                              |
-+-------------------+                    |
-| Output JSON Data  |--------------------+
+|  load_data()      |
+| - Parse input     |                    
+| - Update joint    |                    
+|   positions,      |                    
+|   covariances,    |                    
+|   timestamps      |                    
++-------------------+                    
+          |                              
+          v                              
++-------------------+                    
+|  process()        |                    
+| - Predict current |                    
+|   positions       |                    
+| - Compute weights |                   
+|   (time, cameras) |                    
+| - Fuse positions  |                    
+|   and covariances |                    
+| - Estimate        |                    
+|   velocities      |                    
++-------------------+                    
+          |                              
+          v                              
++-------------------+                    
+| Output JSON Data  |
 +-------------------+
 ```
 
