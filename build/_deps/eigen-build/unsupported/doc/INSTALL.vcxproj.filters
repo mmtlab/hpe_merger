@@ -1,0 +1,13 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <CustomBuild Include="C:\mirrorworld\HpeMerger\build\CMakeFiles\ef5962a86702d6c672f50133a4b08601\INSTALL_force.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="CMake Rules">
+      <UniqueIdentifier>{A8658546-0048-37FF-82E9-16C34F2F314F}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

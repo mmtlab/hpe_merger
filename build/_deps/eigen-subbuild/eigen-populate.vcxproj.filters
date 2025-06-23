@@ -1,0 +1,44 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <CustomBuild Include="C:\mirrorworld\HpeMerger\build\_deps\eigen-subbuild\CMakeFiles\61708a50eb91bae86cb69c0e708d8ad2\eigen-populate-mkdir.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="C:\mirrorworld\HpeMerger\build\_deps\eigen-subbuild\CMakeFiles\61708a50eb91bae86cb69c0e708d8ad2\eigen-populate-download.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="C:\mirrorworld\HpeMerger\build\_deps\eigen-subbuild\CMakeFiles\61708a50eb91bae86cb69c0e708d8ad2\eigen-populate-update.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="C:\mirrorworld\HpeMerger\build\_deps\eigen-subbuild\CMakeFiles\61708a50eb91bae86cb69c0e708d8ad2\eigen-populate-patch.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="C:\mirrorworld\HpeMerger\build\_deps\eigen-subbuild\CMakeFiles\61708a50eb91bae86cb69c0e708d8ad2\eigen-populate-configure.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="C:\mirrorworld\HpeMerger\build\_deps\eigen-subbuild\CMakeFiles\61708a50eb91bae86cb69c0e708d8ad2\eigen-populate-build.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="C:\mirrorworld\HpeMerger\build\_deps\eigen-subbuild\CMakeFiles\61708a50eb91bae86cb69c0e708d8ad2\eigen-populate-install.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="C:\mirrorworld\HpeMerger\build\_deps\eigen-subbuild\CMakeFiles\61708a50eb91bae86cb69c0e708d8ad2\eigen-populate-test.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="C:\mirrorworld\HpeMerger\build\_deps\eigen-subbuild\CMakeFiles\4271bf10aef143a953a14989419478a5\eigen-populate-complete.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="C:\mirrorworld\HpeMerger\build\_deps\eigen-subbuild\CMakeFiles\5fb01c31e68a373d29c58bd4f999761e\eigen-populate.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="C:\mirrorworld\HpeMerger\build\_deps\eigen-subbuild\CMakeLists.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="C:\mirrorworld\HpeMerger\build\_deps\eigen-subbuild\CMakeFiles\eigen-populate" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="CMake Rules">
+      <UniqueIdentifier>{F604FFF0-8A99-3026-8E0B-E15476092618}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

@@ -1,0 +1,46 @@
+{
+	"sources" : 
+	[
+		{
+			"file" : "C:/mirrorworld/HpeMerger/build/_deps/plugin-subbuild/CMakeFiles/plugin-populate"
+		},
+		{
+			"file" : "C:/mirrorworld/HpeMerger/build/_deps/plugin-subbuild/CMakeFiles/33ad43c56a3a8c77df3a3fbfa0d166c8/plugin-populate.rule"
+		},
+		{
+			"file" : "C:/mirrorworld/HpeMerger/build/_deps/plugin-subbuild/CMakeFiles/45d535cbd6b8cffb7d73ac8c88ef27b6/plugin-populate-complete.rule"
+		},
+		{
+			"file" : "C:/mirrorworld/HpeMerger/build/_deps/plugin-subbuild/CMakeFiles/eb2a1c5e15e858159d0fd8b931fa87e8/plugin-populate-build.rule"
+		},
+		{
+			"file" : "C:/mirrorworld/HpeMerger/build/_deps/plugin-subbuild/CMakeFiles/eb2a1c5e15e858159d0fd8b931fa87e8/plugin-populate-configure.rule"
+		},
+		{
+			"file" : "C:/mirrorworld/HpeMerger/build/_deps/plugin-subbuild/CMakeFiles/eb2a1c5e15e858159d0fd8b931fa87e8/plugin-populate-download.rule"
+		},
+		{
+			"file" : "C:/mirrorworld/HpeMerger/build/_deps/plugin-subbuild/CMakeFiles/eb2a1c5e15e858159d0fd8b931fa87e8/plugin-populate-install.rule"
+		},
+		{
+			"file" : "C:/mirrorworld/HpeMerger/build/_deps/plugin-subbuild/CMakeFiles/eb2a1c5e15e858159d0fd8b931fa87e8/plugin-populate-mkdir.rule"
+		},
+		{
+			"file" : "C:/mirrorworld/HpeMerger/build/_deps/plugin-subbuild/CMakeFiles/eb2a1c5e15e858159d0fd8b931fa87e8/plugin-populate-patch.rule"
+		},
+		{
+			"file" : "C:/mirrorworld/HpeMerger/build/_deps/plugin-subbuild/CMakeFiles/eb2a1c5e15e858159d0fd8b931fa87e8/plugin-populate-test.rule"
+		},
+		{
+			"file" : "C:/mirrorworld/HpeMerger/build/_deps/plugin-subbuild/CMakeFiles/eb2a1c5e15e858159d0fd8b931fa87e8/plugin-populate-update.rule"
+		}
+	],
+	"target" : 
+	{
+		"labels" : 
+		[
+			"plugin-populate"
+		],
+		"name" : "plugin-populate"
+	}
+}

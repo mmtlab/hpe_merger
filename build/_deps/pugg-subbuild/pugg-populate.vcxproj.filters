@@ -1,0 +1,44 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <CustomBuild Include="C:\mirrorworld\HpeMerger\build\_deps\pugg-subbuild\CMakeFiles\540e41354854d747851c957e2b923563\pugg-populate-mkdir.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="C:\mirrorworld\HpeMerger\build\_deps\pugg-subbuild\CMakeFiles\540e41354854d747851c957e2b923563\pugg-populate-download.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="C:\mirrorworld\HpeMerger\build\_deps\pugg-subbuild\CMakeFiles\540e41354854d747851c957e2b923563\pugg-populate-update.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="C:\mirrorworld\HpeMerger\build\_deps\pugg-subbuild\CMakeFiles\540e41354854d747851c957e2b923563\pugg-populate-patch.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="C:\mirrorworld\HpeMerger\build\_deps\pugg-subbuild\CMakeFiles\540e41354854d747851c957e2b923563\pugg-populate-configure.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="C:\mirrorworld\HpeMerger\build\_deps\pugg-subbuild\CMakeFiles\540e41354854d747851c957e2b923563\pugg-populate-build.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="C:\mirrorworld\HpeMerger\build\_deps\pugg-subbuild\CMakeFiles\540e41354854d747851c957e2b923563\pugg-populate-install.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="C:\mirrorworld\HpeMerger\build\_deps\pugg-subbuild\CMakeFiles\540e41354854d747851c957e2b923563\pugg-populate-test.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="C:\mirrorworld\HpeMerger\build\_deps\pugg-subbuild\CMakeFiles\1945c38cc8703c6deb7e491cf6ca7a45\pugg-populate-complete.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="C:\mirrorworld\HpeMerger\build\_deps\pugg-subbuild\CMakeFiles\ca1e9bef34860173e37fbf311c448b87\pugg-populate.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="C:\mirrorworld\HpeMerger\build\_deps\pugg-subbuild\CMakeLists.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="C:\mirrorworld\HpeMerger\build\_deps\pugg-subbuild\CMakeFiles\pugg-populate" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="CMake Rules">
+      <UniqueIdentifier>{8F0CBFA3-D12C-36F3-B780-1EFC55ECC32F}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

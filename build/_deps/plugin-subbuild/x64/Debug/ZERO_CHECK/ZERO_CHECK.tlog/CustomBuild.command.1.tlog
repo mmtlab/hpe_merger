@@ -1,0 +1,10 @@
+^C:\MIRRORWORLD\HPEMERGER\BUILD\_DEPS\PLUGIN-SUBBUILD\CMAKEFILES\33AD43C56A3A8C77DF3A3FBFA0D166C8\GENERATE.STAMP.RULE
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SC:/mirrorworld/HpeMerger/build/_deps/plugin-subbuild -BC:/mirrorworld/HpeMerger/build/_deps/plugin-subbuild --check-stamp-list CMakeFiles/generate.stamp.list --vs-solution-file C:/mirrorworld/HpeMerger/build/_deps/plugin-subbuild/plugin-populate.sln
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd

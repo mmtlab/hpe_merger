@@ -1,0 +1,13 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <CustomBuild Include="C:\mirrorworld\HpeMerger\build\_deps\json-subbuild\CMakeFiles\526bf8f633823604d6d0105709873c97\generate.stamp.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="CMake Rules">
+      <UniqueIdentifier>{5B6BED49-D230-3121-AA50-4ED77F6B5726}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

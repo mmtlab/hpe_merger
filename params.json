@@ -1,0 +1,23 @@
+{
+    "time_weight_normalization": 5000000000,
+    "joint_map": [
+  "NOS_",
+  "NEC_",
+  "SHOR",
+  "ELBR",
+  "WRIR",
+  "SHOL",
+  "ELBL",
+  "WRIL",
+  "HIPR",
+  "KNER",
+  "ANKR",
+  "HIPL",
+  "KNEL",
+  "ANKL",
+  "EYER",
+  "EYEL",
+  "EARR",
+  "EARL"
+]
+}
