@@ -119,6 +119,7 @@ The output JSON contains the fused results for each joint:
   "timestamp": {
     "$date": "YYYY-MM-DDTHH:mm:ss.SSS±ZZZZ"
   },
+  "ts": 1234567890123456,
   "type": "FSD",
 
   "NEC_": {

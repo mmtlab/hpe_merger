@@ -77,6 +77,9 @@ public:
         _times[joint_index][camera_index] = timestamp; // store the timestamp of the joint
       }  
     }
+
+    cout << "Received skeleton data for camera index " << camera_index << " at timestamp " << timestamp << endl;
+
     return return_type::success;
   }
 
@@ -85,6 +88,7 @@ public:
   return_type process(json &out) override {
     out.clear();
 
+    /*
     // Current timestamp in nanoseconds
     auto now = std::chrono::system_clock::now();
     auto timestamp = std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count();
@@ -119,14 +123,14 @@ public:
             weights[joint][cam] = exp((time_diff)*(time_diff) / _params["time_weight_normalization"].get<double>());  
         }
       
-        /*  # NON CREDO SERVA NORMALIZZARE I PESI, MA LO LASCIO QUI PER RIFERIMENTO
+        //  # NON CREDO SERVA NORMALIZZARE I PESI, MA LO LASCIO QUI PER RIFERIMENTO
         //normalize the weights for each joint
-        double sum_weights = std::accumulate(weights[joint].begin(), weights[joint].end(), 0.0);
-        if (sum_weights > 0) {
-          for (size_t cam = 0; cam < _positions[joint].size(); ++cam) {
-            weights[joint][cam] /= sum_weights; // normalize the weights
-          }
-        } */
+        //double sum_weights = std::accumulate(weights[joint].begin(), weights[joint].end(), 0.0);
+        //if (sum_weights > 0) {
+        //  for (size_t cam = 0; cam < _positions[joint].size(); ++cam) {
+        //    weights[joint][cam] /= sum_weights; // normalize the weights
+        //  }
+        //} 
       }
 
       // does the same for the current 
@@ -197,7 +201,7 @@ public:
       out[joint_name]["unc"] = { _merged_covariances[joint](0,0), _merged_covariances[joint](1,1), _merged_covariances[joint](2,2),
                             _merged_covariances[joint](0,1), _merged_covariances[joint](0,2), _merged_covariances[joint](1,2) };
     }
-
+    */
     // This sets the agent_id field in the output json object, only when it is
     // not empty
     if (!_agent_id.empty()) out["agent_id"] = _agent_id;
