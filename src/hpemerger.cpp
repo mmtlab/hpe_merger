@@ -47,17 +47,18 @@ public:
     long timestamp = 0;
 
     // store the global timestamp of the input data
-    if (input.contains("timestamp")) {
-      timestamp = input["timestamp"];
+    if (input.contains("ts")) {
+      timestamp = input["ts"].get<long>(); // get the timestamp in nanoseconds
     } else {
-      _error = "Input data does not contain a timestamp";
+      // if the timestamp is not present in "ts" field, return an error (SHOULD we use the "timestamp" field instead??)
+      _error = "Input data does not contain a timestamp in the 'ts' field.";
       return return_type::error;
     }
 
     // ignore the skeleton type (2d,3d, fusion) since the only one interesting cannot happen here
 
     // gets the camera index if previously set otherwise adds it to the list of cameras and returns the index
-    int camera_index = get_camera_index(input["agent_id"]);
+    int camera_index = get_camera_index(input["hostname"]);
     // TODO: controllare che l'agent_id sia trasmesso nel json input!!
 
     // retrieve the skeleton data just received and update the covariance matrix and joint positions
@@ -84,7 +85,9 @@ public:
   return_type process(json &out) override {
     out.clear();
 
-    long timestamp = pugg::Kernel::get_instance()->get_timestamp(); // gets the current timestamp from the kernel for time difference calculations
+    // Current timestamp in nanoseconds
+    auto now = std::chrono::system_clock::now();
+    auto timestamp = std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count();
 
     // load the data as necessary and set the fields of the json out variable
 
@@ -168,7 +171,7 @@ public:
         if (((_covariances[joint][cam].array() < 0).any()) && ((_covariances[joint][cam](0,0) == 0))) {
           // check if the joint has a valid covariance (no null first element, no negative values
         } else {
-            _merged_positions[joint] += _positions[joint][cam]* weighted_covariances[joint][cam];
+            _merged_positions[joint] += _positions[joint][cam] * weighted_covariances[joint][cam];
             _camera_used[joint] +=1; // increment the camera used for the joint
         }
       }

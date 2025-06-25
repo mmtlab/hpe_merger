@@ -74,19 +74,27 @@ plugin.set_params(&params);
 
 ### 2. **Input Data Format**
 
-Input data should be a JSON object with the following structure for each joint:
+Input data should be a JSON object with the following structure:
 
 ```json
 {
-  "agent_id": "camera_1",
-  "timestamp": 1234567890,
+  "agent_id": "hpe",
+  "hostname": "PC-1234",
+  "timecode": 123456.78,
+  "timestamp": {
+    "$date": "YYYY-MM-DDTHH:mm:ss.SSS±ZZZZ"
+  },
+  "typ": "3D",
+
   "NEC_": {
+    "ncm": 1,
     "crd": [0.1, 1.2, -0.3],
     "unc": [0.01, 0.02, 0.03, 0.001, 0.002, 0.003]
   },
   ...
 }
 ```
+- `"ncm"`: Number of cameras used to detect this joint
 - `"crd"`: 3D coordinates `[x, y, z]`
 - `"unc"`: Covariance matrix in the order `[xx, yy, zz, xy, xz, yz]`
 
@@ -105,8 +113,14 @@ The output JSON contains the fused results for each joint:
 
 ```json
 {
-  "timestamp": 1234567890,
+  "agent_id": "hpe-merger",
+  "hostname": "PC-5678",
+  "timecode": 123456.78,
+  "timestamp": {
+    "$date": "YYYY-MM-DDTHH:mm:ss.SSS±ZZZZ"
+  },
   "type": "FSD",
+
   "NEC_": {
     "ncm": 2,
     "crd": [0.12, 1.45, -0.33],
