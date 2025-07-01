@@ -43,16 +43,16 @@ public:
 
   // Implement the actual functionality here
   return_type load_data(json const &input, string topic = "") override {
-
+  
     long timestamp = 0;
 
     // store the global timestamp of the input data
     if (input.contains("ts")) {
-      timestamp = input["ts"].get<long>(); // get the timestamp in nanoseconds
+      timestamp = input["ts"]; // get the timestamp in nanoseconds
     } else {
       // if the timestamp is not present in "ts" field, return an error (SHOULD we use the "timestamp" field instead??)
       _error = "Input data does not contain a timestamp in the 'ts' field.";
-      return return_type::error;
+      return return_type::retry;
     }
 
     // ignore the skeleton type (2d,3d, fusion) since the only one interesting cannot happen here
@@ -86,29 +86,36 @@ public:
   return_type process(json &out) override {
     out.clear();
 
-    
+    cout << "HPEmergerPlugin::process() called" << endl;
     // Current timestamp in nanoseconds
     auto now = std::chrono::system_clock::now();
     auto timestamp = std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count();
 
+    
+    cout << "Timestamp now: " << timestamp << endl;
+
     // load the data as necessary and set the fields of the json out variable
 
     // predict the current positions of the joints based on the previous positions and velocities
-    std::vector<Eigen::Vector3d> current_positions(_merged_positions.size());
+    std::vector<Eigen::Vector3d> merged_positions_prev(_merged_positions.size());
+    std::vector<Eigen::Matrix3d> merged_covariances_prev(_merged_positions.size()); // please note that this is already weighted and inverted
     std::vector<Eigen::Vector3d> predicted_positions(_merged_positions.size());
-    std::vector<Eigen::Matrix3d> current_covariances(_merged_positions.size()); // please note that this is already weighted and inverted
+    std::vector<Eigen::Matrix3d> predicted_covariances(_merged_positions.size());
     std::vector<double> current_weight(_merged_positions.size());
 
     // Compute the current positions, covariances and weights based on the merged positions, covariances and velocities
     for (size_t i = 0; i < _merged_positions.size(); ++i) {   
       long merged_time_diff = timestamp - _merged_times[i]; // time difference between the current timestamp and the merged timestamp
       current_weight[i] = exp((merged_time_diff)*(merged_time_diff) / _params["time_weight_normalization"].get<double>()); // weight based on the time difference
-      current_positions[i] = _merged_positions[i]; // stores for the velocity computation at the end
-      predicted_positions[i] = _merged_positions[i] + _velocities[i]*(merged_time_diff); // assuming _times[i] is in m/ns since the timestamp is in ns
+      merged_positions_prev[i] = _merged_positions[i]; // stores for the velocity computation at the end
+      predicted_positions[i] = merged_positions_prev[i] + _velocities[i]*(merged_time_diff); // assuming _times[i] is in m/ns since the timestamp is in ns
       if (_merged_covariances[i].determinant() != 0) {
-        current_covariances[i] = (_merged_covariances[i] * current_weight[i]).inverse(); // update the covariance based on the weight
+        // TODO: propagate the covariance based on the velocity and time difference
+        merged_covariances_prev[i] = _merged_covariances[i]; // store the previous merged covariance for the velocity computation at the end
+        predicted_covariances[i] = merged_covariances_prev[i] + (merged_time_diff * merged_time_diff) * _velocities_covariances[i]; // propagate the covariance based on the velocity and time difference
+        predicted_covariances[i] = (predicted_covariances[i] * current_weight[i]).inverse(); // update the covariance based on the weight
       } else {
-        current_covariances[i] = Eigen::Matrix3d::Zero(); // if the covariance is singular, set it to zero
+        predicted_covariances[i] = Eigen::Matrix3d::Zero(); // if the covariance is singular, set it to zero
       }
     }
 
@@ -150,7 +157,6 @@ public:
     for (size_t joint = 0; joint < _positions.size(); ++joint) {
       _merged_positions[joint] = Eigen::Vector3d::Zero();
       _merged_covariances[joint] = Eigen::Matrix3d::Zero();
-      _merged_times[joint] = timestamp;
       _camera_used[joint] = 0; // reset the camera used for the joint
 
       for (size_t cam = 0; cam < _positions[joint].size(); ++cam) {
@@ -160,12 +166,9 @@ public:
           _merged_covariances[joint] += weighted_covariances[joint][cam]; // merge the covariances using the inverse
         }
       }
-
-      // TODO: propagate correctly the prior covariance usin the formula Sigma_prior = ((1+DT)^2)*Sigma_prior-1 + (-DT^2)*Sigma_prior-2, assuming DT=(t0-t1)/(t1-t2)
       
-
       //adds the prior positions weighted by the weights to the merged position
-      _merged_covariances[joint] += current_covariances[joint]; // add the current covariance to the merged covariance
+      _merged_covariances[joint] += predicted_covariances[joint]; // add the current covariance to the merged covariance
       _merged_covariances[joint] = _merged_covariances[joint].inverse(); // invert the merged covariance matrix
 
       // merge the positions using the weights and the covariances
@@ -179,20 +182,36 @@ public:
         }
       }
       
-      _merged_positions[joint] += current_covariances[joint] * current_positions[joint]; // add the current position to the merged position
+      _merged_positions[joint] += predicted_covariances[joint] * merged_positions_prev[joint]; // add the current position to the merged position
       _merged_positions[joint] = _merged_covariances[joint] * _merged_positions[joint]; // multiply the merged position by the merged covariance matrix
     }
     
+    
+    cout << "4" << endl; 
+
     //computes the joint velocities based on the previous positions and the current positions for the next iteration
     for (size_t joint = 0; joint < _positions.size(); ++joint) {
-      double dt = timestamp - _merged_times[joint]; // time difference between the current timestamp and the merged timestamp
-      _velocities[joint] = (_merged_positions[joint] - current_positions[joint]) / dt; // compute the velocity as the difference between the current position and the previous position divided by the time difference
+      
+      cout << "joint: " << joint << endl;
+      cout << "timestamp (ns): " << timestamp << endl;
+      cout << "merged_times[" << joint << "] (ns): " << _merged_times[joint] << endl;
+
+      long dt = timestamp - _merged_times[joint]; // time difference between the current timestamp and the merged timestamp
+      cout << "dt: " << dt << endl;
+      
+      _velocities[joint] = (_merged_positions[joint] - merged_positions_prev[joint]) / dt; // compute the velocity as the difference between the current position and the previous position divided by the time difference
+      _velocities_covariances[joint] = (1/(dt * dt)) * (_merged_covariances[joint] + merged_covariances_prev[joint]); // compute the velocity covariance as the sum of the merged covariance and the current covariance divided by the time difference
+      
+      _merged_times[joint] = timestamp;
     }
+
+    
+    cout << "5" << endl;
 
     //TODO: Pubblicare i dati della fusione ed aggiornare le posizioni, le velocità e covarianze dei giunti della fusione
     // Fill the output json object with the merged positions and covariances
     out["ts"] = timestamp; // set the timestamp of the output data
-    out["type"] = "FSD"; // set the type of the output data to fusion
+    out["typ"] = "FSD"; // set the type of the output data to fusion
 
     for (size_t joint = 0; joint < _merged_positions.size(); ++joint) {
       string joint_name = keypoints_map_int2string[joint]; // get the joint name from the map
@@ -202,7 +221,8 @@ public:
                             _merged_covariances[joint](0,1), _merged_covariances[joint](0,2), _merged_covariances[joint](1,2) };
     }
     
-
+    cout << "HPE merged:" << out.dump(2) << endl; // print the output data to the console for debugging
+   
     // This sets the agent_id field in the output json object, only when it is
     // not empty
     if (!_agent_id.empty()) out["agent_id"] = _agent_id;
@@ -228,16 +248,26 @@ public:
       keypoints_map_int2string[i] = _params["joint_map"][i];
     }
 
+    // Current timestamp in nanoseconds
+    auto now = std::chrono::system_clock::now();
+    long timestamp = std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count();
+
     // initialize the internal vectors based on the number of cameras
     size_t num_joints = _params["joint_map"].size();
     _positions.resize(num_joints);
     _covariances.resize(num_joints);
     _times.resize(num_joints);
     _velocities.resize(num_joints, Eigen::Vector3d::Zero());
+    _velocities_covariances.resize(num_joints, Eigen::Matrix3d::Zero());
     _merged_positions.resize(num_joints, Eigen::Vector3d::Zero());
     _merged_covariances.resize(num_joints, Eigen::Matrix3d::Zero());
     _merged_times.resize(num_joints, 0);
     _camera_used.resize(num_joints, 0);
+
+    for (size_t joint = 0; joint < num_joints; ++joint) {
+      _merged_times[joint] = timestamp; // set the merged time to the current timestamp
+    }
+    cout << "MERGED TIMES: " << _merged_times[0] << endl;
   }
 
   // gets the camera index if previously set otherwise adds it to the list of cameras and returns the index (resizes the internal vectors to accommodate the new camera)
@@ -287,9 +317,8 @@ private:
   std::vector<std::vector<Eigen::Vector3d>> _positions; // _positions[j][i] is the position (x,y,z) of the j-th joint of the i-th camera.
   std::vector<std::vector<Eigen::Matrix3d>> _covariances;  // _covariances[j][i] is the covariance matrix of the j-th joint of the i-th camera.
   std::vector<std::vector<long>> _times; // _times[j][i] is the time of the j-th joint of the i-th camera, computed from the previous prediction step.
-
   std::vector<Eigen::Vector3d> _velocities; // _velocities[j] is the velocity (x,y,z) of the j-th joint, computed from the previous prediction step. 
-
+  std::vector<Eigen::Matrix3d> _velocities_covariances; // _velocities[j] is the velocity (x,y,z) of the j-th joint, computed from the previous prediction step. 
   std::vector<Eigen::Vector3d> _merged_positions; // _merged_positions[j] is the position (x,y,z) of the j-th joint, computed from the previous prediction step of the merged data.
   std::vector<Eigen::Matrix3d> _merged_covariances; // _merged_covariances[j] is the covariance matrix of the j-th joint, computed from the previous prediction step of the merged data 
   std::vector<long> _merged_times; // _merged_times[j] is the time of the j-th joint, computed from the previous prediction step of the merged data
