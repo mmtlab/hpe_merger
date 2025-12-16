@@ -284,3 +284,7 @@ The plugin supports the following settings in the INI file:
 ```
 
 All settings are optional; if omitted, the default values are used.
+
+
+TO RUN: 
+mads-filter hpemerger.plugin

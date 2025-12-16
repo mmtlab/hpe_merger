@@ -44,7 +44,7 @@ public:
   // Implement the actual functionality here
   return_type load_data(json const &input, string topic = "") override {
   
-    long timestamp = 0;
+    uint64_t timestamp = 0;
 
     // store the global timestamp of the input data
     if (input.contains("ts")) {
@@ -60,6 +60,8 @@ public:
     // gets the camera index if previously set otherwise adds it to the list of cameras and returns the index
     int camera_index = get_camera_index(input["hostname"]);
     // TODO: controllare che l'agent_id sia trasmesso nel json input!!
+
+    
 
     // retrieve the skeleton data just received and update the covariance matrix and joint positions
     for(const auto &[label, data] : input.items()) {
@@ -78,6 +80,16 @@ public:
       }  
     }
 
+    /*
+    cout << endl << "Camera index: " << camera_index << ", Timestamp: " << timestamp << " ns" << endl;
+
+    cout << _positions[0][camera_index](0) << ", " << _positions[0][camera_index](1) << ", " << _positions[0][camera_index](2) << endl << endl;
+    
+    cout << _covariances[0][camera_index](0) << ", " << _covariances[0][camera_index](1) << ", " << _covariances[0][camera_index](2) << endl;
+    cout << _covariances[0][camera_index](3) << ", " << _covariances[0][camera_index](4) << ", " << _covariances[0][camera_index](5) << endl;
+    cout << _covariances[0][camera_index](6) << ", " << _covariances[0][camera_index](7) << ", " << _covariances[0][camera_index](8) << endl << endl;
+    */
+
     return return_type::success;
   }
 
@@ -86,13 +98,12 @@ public:
   return_type process(json &out) override {
     out.clear();
 
-    cout << "HPEmergerPlugin::process() called" << endl;
     // Current timestamp in nanoseconds
     auto now = std::chrono::system_clock::now();
-    auto timestamp = std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count();
-
+    int64_t timestamp = std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count();
     
-    cout << "Timestamp now: " << timestamp << endl;
+    //int64_t timestamp = _times[0][0] + 30000000; // use the timestamp of the first joint of the first camera as current timestamp (adding 30 ms to simulate processing delay)
+    //cout << "Timestamp NOW: " << timestamp << endl;
 
     // load the data as necessary and set the fields of the json out variable
 
@@ -104,9 +115,11 @@ public:
     std::vector<double> current_weight(_merged_positions.size());
 
     // Compute the current positions, covariances and weights based on the merged positions, covariances and velocities
+    int64_t merged_time_diff;
     for (size_t i = 0; i < _merged_positions.size(); ++i) {   
-      long merged_time_diff = timestamp - _merged_times[i]; // time difference between the current timestamp and the merged timestamp
-      current_weight[i] = exp((merged_time_diff)*(merged_time_diff) / _params["time_weight_normalization"].get<double>()); // weight based on the time difference
+      merged_time_diff = timestamp - _merged_times[i]; // time difference between the current timestamp and the merged timestamp
+      double time_const = _params["time_weight_normalization"].get<double>();
+      current_weight[i] = exp(-((merged_time_diff)*(merged_time_diff)) / (time_const * time_const)); // weight based on the time difference
       merged_positions_prev[i] = _merged_positions[i]; // stores for the velocity computation at the end
       predicted_positions[i] = merged_positions_prev[i] + _velocities[i]*(merged_time_diff); // assuming _times[i] is in m/ns since the timestamp is in ns
       if (_merged_covariances[i].determinant() != 0) {
@@ -119,14 +132,24 @@ public:
       }
     }
 
+    /*
+    cout << (merged_time_diff)*(merged_time_diff) / _params["time_weight_normalization"].get<double>() << endl;
+    cout << "merged_time_diff: " << merged_time_diff << endl;
+    cout << "current_weight: " << current_weight[0] << endl;
+
+    cout << "Predicted position joint 0: " << predicted_positions[0](0) << ", " << predicted_positions[0](1) << ", " << predicted_positions[0](2) << endl;
+    cout << "Predicted covariance joint 0: " << predicted_covariances[0](0) << ", " << predicted_covariances[0](1) << ", " << predicted_covariances[0](2) << endl;
+    */
+
     //computes the weights for each joint based on the time difference between the current timestamp and the timestamp of the joint
     std::vector<std::vector<double>> weights(_positions.size(), std::vector<double>(_positions[0].size(), 0.0));
+    double time_const = _params["time_weight_normalization"].get<double>();
     for (size_t joint = 0; joint < _positions.size(); ++joint) {
       for (size_t cam = 0; cam < _positions[joint].size(); ++cam) {
-        long time_diff = timestamp - _times[joint][cam];
+        int64_t time_diff = timestamp - _times[joint][cam];
 
-        // weight is computed as an exponential based on the time difference (e^(-time_diff^2 / normalization_factor))
-        weights[joint][cam] = exp((time_diff)*(time_diff) / _params["time_weight_normalization"].get<double>());  
+        // weight is computed as an exponential based on the time difference (e^(-time_diff^2 / tau^2))
+        weights[joint][cam] = exp(-((time_diff)*(time_diff)) / (time_const * time_const));  
       }
       
       //  # NON CREDO SERVA NORMALIZZARE I PESI, MA LO LASCIO QUI PER RIFERIMENTO
@@ -185,28 +208,22 @@ public:
       _merged_positions[joint] += predicted_covariances[joint] * merged_positions_prev[joint]; // add the current position to the merged position
       _merged_positions[joint] = _merged_covariances[joint] * _merged_positions[joint]; // multiply the merged position by the merged covariance matrix
     }
-    
-    
-    cout << "4" << endl; 
 
     //computes the joint velocities based on the previous positions and the current positions for the next iteration
     for (size_t joint = 0; joint < _positions.size(); ++joint) {
       
-      cout << "joint: " << joint << endl;
-      cout << "timestamp (ns): " << timestamp << endl;
-      cout << "merged_times[" << joint << "] (ns): " << _merged_times[joint] << endl;
+      //cout << "joint: " << joint << endl;
+      //cout << "timestamp (ns): " << timestamp << endl;
+      //cout << "merged_times[" << joint << "] (ns): " << _merged_times[joint] << endl;
 
-      long dt = timestamp - _merged_times[joint]; // time difference between the current timestamp and the merged timestamp
-      cout << "dt: " << dt << endl;
+      int64_t dt = timestamp - _merged_times[joint]; // time difference between the current timestamp and the merged timestamp
+      //cout << "dt: " << dt << endl;
       
       _velocities[joint] = (_merged_positions[joint] - merged_positions_prev[joint]) / dt; // compute the velocity as the difference between the current position and the previous position divided by the time difference
       _velocities_covariances[joint] = (1/(dt * dt)) * (_merged_covariances[joint] + merged_covariances_prev[joint]); // compute the velocity covariance as the sum of the merged covariance and the current covariance divided by the time difference
       
       _merged_times[joint] = timestamp;
     }
-
-    
-    cout << "5" << endl;
 
     //TODO: Pubblicare i dati della fusione ed aggiornare le posizioni, le velocità e covarianze dei giunti della fusione
     // Fill the output json object with the merged positions and covariances
@@ -221,7 +238,7 @@ public:
                             _merged_covariances[joint](0,1), _merged_covariances[joint](0,2), _merged_covariances[joint](1,2) };
     }
     
-    cout << "HPE merged:" << out.dump(2) << endl; // print the output data to the console for debugging
+    // cout << "HPE merged:" << out.dump(2) << endl; // print the output data to the console for debugging
    
     // This sets the agent_id field in the output json object, only when it is
     // not empty
@@ -250,7 +267,7 @@ public:
 
     // Current timestamp in nanoseconds
     auto now = std::chrono::system_clock::now();
-    long timestamp = std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count();
+    int64_t timestamp = std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count();
 
     // initialize the internal vectors based on the number of cameras
     size_t num_joints = _params["joint_map"].size();
@@ -267,7 +284,6 @@ public:
     for (size_t joint = 0; joint < num_joints; ++joint) {
       _merged_times[joint] = timestamp; // set the merged time to the current timestamp
     }
-    cout << "MERGED TIMES: " << _merged_times[0] << endl;
   }
 
   // gets the camera index if previously set otherwise adds it to the list of cameras and returns the index (resizes the internal vectors to accommodate the new camera)
@@ -316,12 +332,12 @@ private:
   // Define the fields that are used to store internal resources
   std::vector<std::vector<Eigen::Vector3d>> _positions; // _positions[j][i] is the position (x,y,z) of the j-th joint of the i-th camera.
   std::vector<std::vector<Eigen::Matrix3d>> _covariances;  // _covariances[j][i] is the covariance matrix of the j-th joint of the i-th camera.
-  std::vector<std::vector<long>> _times; // _times[j][i] is the time of the j-th joint of the i-th camera, computed from the previous prediction step.
+  std::vector<std::vector<uint64_t>> _times; // _times[j][i] is the time of the j-th joint of the i-th camera, computed from the previous prediction step.
   std::vector<Eigen::Vector3d> _velocities; // _velocities[j] is the velocity (x,y,z) of the j-th joint, computed from the previous prediction step. 
   std::vector<Eigen::Matrix3d> _velocities_covariances; // _velocities[j] is the velocity (x,y,z) of the j-th joint, computed from the previous prediction step. 
   std::vector<Eigen::Vector3d> _merged_positions; // _merged_positions[j] is the position (x,y,z) of the j-th joint, computed from the previous prediction step of the merged data.
   std::vector<Eigen::Matrix3d> _merged_covariances; // _merged_covariances[j] is the covariance matrix of the j-th joint, computed from the previous prediction step of the merged data 
-  std::vector<long> _merged_times; // _merged_times[j] is the time of the j-th joint, computed from the previous prediction step of the merged data
+  std::vector<uint64_t> _merged_times; // _merged_times[j] is the time of the j-th joint, computed from the previous prediction step of the merged data
   std::vector<int> _camera_used; // is the number of camera used to merge the j-th joint 
 
   //lists the cameras that are transimitting data
