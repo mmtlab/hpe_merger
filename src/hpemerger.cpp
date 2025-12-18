@@ -43,7 +43,9 @@ public:
 
   // Implement the actual functionality here
   return_type load_data(json const &input, string topic = "") override {
-  
+    
+    //cout << "Input JSON received by HPE Merger: " << input.dump(2) << endl;
+
     uint64_t timestamp = 0;
 
     // store the global timestamp of the input data
@@ -52,7 +54,7 @@ public:
     } else {
       // if the timestamp is not present in "ts" field, return an error (SHOULD we use the "timestamp" field instead??)
       _error = "Input data does not contain a timestamp in the 'ts' field.";
-      return return_type::retry;
+      return return_type::error;
     }
 
     // ignore the skeleton type (2d,3d, fusion) since the only one interesting cannot happen here
@@ -61,7 +63,7 @@ public:
     int camera_index = get_camera_index(input["hostname"]);
     // TODO: controllare che l'agent_id sia trasmesso nel json input!!
 
-    
+    cout << "HPE Merger - Receiving data from camera: " << input["hostname"] << " with index: " << camera_index << endl;
 
     // retrieve the skeleton data just received and update the covariance matrix and joint positions
     for(const auto &[label, data] : input.items()) {
@@ -81,13 +83,14 @@ public:
     }
 
     /*
+    int joint_idx = 10; // for testing, we print only the first joint
     cout << endl << "Camera index: " << camera_index << ", Timestamp: " << timestamp << " ns" << endl;
 
-    cout << _positions[0][camera_index](0) << ", " << _positions[0][camera_index](1) << ", " << _positions[0][camera_index](2) << endl << endl;
+    cout << _positions[joint_idx][camera_index](0) << ", " << _positions[joint_idx][camera_index](1) << ", " << _positions[joint_idx][camera_index](2) << endl << endl;
     
-    cout << _covariances[0][camera_index](0) << ", " << _covariances[0][camera_index](1) << ", " << _covariances[0][camera_index](2) << endl;
-    cout << _covariances[0][camera_index](3) << ", " << _covariances[0][camera_index](4) << ", " << _covariances[0][camera_index](5) << endl;
-    cout << _covariances[0][camera_index](6) << ", " << _covariances[0][camera_index](7) << ", " << _covariances[0][camera_index](8) << endl << endl;
+    cout << _covariances[joint_idx][camera_index](0) << ", " << _covariances[joint_idx][camera_index](1) << ", " << _covariances[joint_idx][camera_index](2) << endl;
+    cout << _covariances[joint_idx][camera_index](3) << ", " << _covariances[joint_idx][camera_index](4) << ", " << _covariances[joint_idx][camera_index](5) << endl;
+    cout << _covariances[joint_idx][camera_index](6) << ", " << _covariances[joint_idx][camera_index](7) << ", " << _covariances[joint_idx][camera_index](8) << endl << endl;
     */
 
     return return_type::success;
@@ -102,7 +105,21 @@ public:
     auto now = std::chrono::system_clock::now();
     int64_t timestamp = std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count();
     
-    //int64_t timestamp = _times[0][0] + 30000000; // use the timestamp of the first joint of the first camera as current timestamp (adding 30 ms to simulate processing delay)
+    /*
+    // Find the maximum timestamp in _times across all joints and cameras
+    uint64_t max_time = 0;
+    for (size_t joint = 0; joint < _times.size(); ++joint) {
+      for (size_t cam = 0; cam < _times[joint].size(); ++cam) {
+        if (_times[joint][cam] > max_time) {
+          max_time = _times[joint][cam];
+        }
+      }
+    }
+    
+    // Add a random delay between 1 and 30 ms (in nanoseconds)
+    int64_t timestamp = max_time + 1000000 + (rand() % 29000000);
+    */
+
     //cout << "Timestamp NOW: " << timestamp << endl;
 
     // load the data as necessary and set the fields of the json out variable
@@ -123,7 +140,6 @@ public:
       merged_positions_prev[i] = _merged_positions[i]; // stores for the velocity computation at the end
       predicted_positions[i] = merged_positions_prev[i] + _velocities[i]*(merged_time_diff); // assuming _times[i] is in m/ns since the timestamp is in ns
       if (_merged_covariances[i].determinant() != 0) {
-        // TODO: propagate the covariance based on the velocity and time difference
         merged_covariances_prev[i] = _merged_covariances[i]; // store the previous merged covariance for the velocity computation at the end
         predicted_covariances[i] = merged_covariances_prev[i] + (merged_time_diff * merged_time_diff) * _velocities_covariances[i]; // propagate the covariance based on the velocity and time difference
         predicted_covariances[i] = (predicted_covariances[i] * current_weight[i]).inverse(); // update the covariance based on the weight
