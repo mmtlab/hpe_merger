@@ -46,11 +46,18 @@ public:
     
     //cout << "Input JSON received by HPE Merger: " << input.dump(2) << endl;
 
+    // Check if input has a "message" field and use it as the actual data
+    json data_to_process = input;
+    if (input.contains("message") && input["message"].is_object()) {
+      data_to_process = input["message"];
+      _is_dummy = true; 
+    }
+
     uint64_t timestamp = 0;
 
     // store the global timestamp of the input data
-    if (input.contains("ts")) {
-      timestamp = input["ts"]; // get the timestamp in nanoseconds
+    if (data_to_process.contains("ts")) {
+      timestamp = data_to_process["ts"]; // get the timestamp in nanoseconds
     } else {
       // if the timestamp is not present in "ts" field, return an error (SHOULD we use the "timestamp" field instead??)
       _error = "Input data does not contain a timestamp in the 'ts' field.";
@@ -60,14 +67,51 @@ public:
     // ignore the skeleton type (2d,3d, fusion) since the only one interesting cannot happen here
 
     // gets the camera index if previously set otherwise adds it to the list of cameras and returns the index
-    int camera_index = get_camera_index(input["hostname"]);
+    int camera_index = get_camera_index(data_to_process["hostname"]);
     // TODO: controllare che l'agent_id sia trasmesso nel json input!!
 
-    cout << "HPE Merger - Receiving data from camera: " << input["hostname"] << " with index: " << camera_index << endl;
+    cout << "HPE Merger - Receiving data from camera: " << data_to_process["hostname"] << " with index: " << camera_index << endl;
 
     // retrieve the skeleton data just received and update the covariance matrix and joint positions
-    for(const auto &[label, data] : input.items()) {
+    for(const auto &[label, data] : data_to_process.items()) {
       if(data.contains("crd") && data.contains("unc")){
+        
+        // Validate that crd and unc are arrays with correct size
+        if (!data["crd"].is_array() || !data["unc"].is_array()) {
+          continue;
+        }
+
+        if (data["crd"].size() != 3 || data["unc"].size() != 6) {
+          continue;
+        }
+
+        // Check if all coordinate values are valid numbers (not empty strings)
+        bool crd_valid = true;
+        for (size_t i = 0; i < 3; ++i) {
+          if (!data["crd"][i].is_number()) {
+            crd_valid = false;
+            break;
+          }
+        }
+
+        // Check if all covariance values are valid numbers (not empty strings)
+        bool unc_valid = true;
+        for (size_t i = 0; i < 6; ++i) {
+          if (!data["unc"][i].is_number()) {
+            unc_valid = false;
+            break;
+          }
+        }
+
+        if (!crd_valid || !unc_valid) {
+          continue;
+        }
+
+        // At this point, we have valid data
+        if (keypoints_map_string2int.find(label) == keypoints_map_string2int.end()) {
+          continue;
+        }
+
         int joint_index = keypoints_map_string2int[label]; // joint index
 
         _positions[joint_index][camera_index] = Eigen::Vector3d(data["crd"][0], data["crd"][1], data["crd"][2]);
@@ -100,25 +144,29 @@ public:
   // into the output json object
   return_type process(json &out) override {
     out.clear();
-
-    // Current timestamp in nanoseconds
-    auto now = std::chrono::system_clock::now();
-    int64_t timestamp = std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count();
     
-    /*
-    // Find the maximum timestamp in _times across all joints and cameras
-    uint64_t max_time = 0;
-    for (size_t joint = 0; joint < _times.size(); ++joint) {
-      for (size_t cam = 0; cam < _times[joint].size(); ++cam) {
-        if (_times[joint][cam] > max_time) {
-          max_time = _times[joint][cam];
+    int64_t timestamp;
+    if (!_is_dummy) {
+      // Current timestamp in nanoseconds
+      // For LIVE processing, use system time:
+      auto now = std::chrono::system_clock::now();
+      timestamp = std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count();
+    }
+    else {
+      // For RECORDED data processing, use the maximum timestamp from the data:
+      // Find the maximum timestamp in _times across all joints and cameras
+      uint64_t max_time = 0;
+      for (size_t joint = 0; joint < _times.size(); ++joint) {
+        for (size_t cam = 0; cam < _times[joint].size(); ++cam) {
+          if (_times[joint][cam] > max_time) {
+            max_time = _times[joint][cam];
+          }
         }
       }
+      
+      // Add a random delay between 1 and 30 ms (in nanoseconds) to simulate processing
+      timestamp = max_time + 1000000 + (rand() % 29000000);
     }
-    
-    // Add a random delay between 1 and 30 ms (in nanoseconds)
-    int64_t timestamp = max_time + 1000000 + (rand() % 29000000);
-    */
 
     //cout << "Timestamp NOW: " << timestamp << endl;
 
@@ -127,8 +175,8 @@ public:
     // predict the current positions of the joints based on the previous positions and velocities
     std::vector<Eigen::Vector3d> merged_positions_prev(_merged_positions.size());
     std::vector<Eigen::Matrix3d> merged_covariances_prev(_merged_positions.size()); // please note that this is already weighted and inverted
-    std::vector<Eigen::Vector3d> predicted_positions(_merged_positions.size());
-    std::vector<Eigen::Matrix3d> predicted_covariances(_merged_positions.size());
+    std::vector<Eigen::Vector3d> prior_positions(_merged_positions.size()); // this is the PRIOR for the fusion
+    std::vector<Eigen::Matrix3d> prior_covariances_inv(_merged_positions.size());
     std::vector<double> current_weight(_merged_positions.size());
 
     // Compute the current positions, covariances and weights based on the merged positions, covariances and velocities
@@ -138,24 +186,17 @@ public:
       double time_const = _params["time_weight_normalization"].get<double>();
       current_weight[i] = exp(-((merged_time_diff)*(merged_time_diff)) / (time_const * time_const)); // weight based on the time difference
       merged_positions_prev[i] = _merged_positions[i]; // stores for the velocity computation at the end
-      predicted_positions[i] = merged_positions_prev[i] + _velocities[i]*(merged_time_diff); // assuming _times[i] is in m/ns since the timestamp is in ns
+      prior_positions[i] = merged_positions_prev[i] + _velocities[i]*(merged_time_diff); // assuming _times[i] is in m/ns since the timestamp is in ns
       if (_merged_covariances[i].determinant() != 0) {
         merged_covariances_prev[i] = _merged_covariances[i]; // store the previous merged covariance for the velocity computation at the end
-        predicted_covariances[i] = merged_covariances_prev[i] + (merged_time_diff * merged_time_diff) * _velocities_covariances[i]; // propagate the covariance based on the velocity and time difference
-        predicted_covariances[i] = (predicted_covariances[i] * current_weight[i]).inverse(); // update the covariance based on the weight
+        prior_covariances_inv[i] = merged_covariances_prev[i] + (merged_time_diff * merged_time_diff) * _velocities_covariances[i]; // propagate the covariance based on the velocity and time difference
+        prior_covariances_inv[i] = (prior_covariances_inv[i]).inverse()*current_weight[i]; // update the covariance based on the weight (inverted for computational efficiency)
       } else {
-        predicted_covariances[i] = Eigen::Matrix3d::Zero(); // if the covariance is singular, set it to zero
+        prior_covariances_inv[i] = Eigen::Matrix3d::Zero(); // if the covariance is singular, set it to zero
       }
+      //DEBUG ONLY: set prior to zero  (unrelevant)
+      prior_covariances_inv[i] = Eigen::Matrix3d::Zero(); 
     }
-
-    /*
-    cout << (merged_time_diff)*(merged_time_diff) / _params["time_weight_normalization"].get<double>() << endl;
-    cout << "merged_time_diff: " << merged_time_diff << endl;
-    cout << "current_weight: " << current_weight[0] << endl;
-
-    cout << "Predicted position joint 0: " << predicted_positions[0](0) << ", " << predicted_positions[0](1) << ", " << predicted_positions[0](2) << endl;
-    cout << "Predicted covariance joint 0: " << predicted_covariances[0](0) << ", " << predicted_covariances[0](1) << ", " << predicted_covariances[0](2) << endl;
-    */
 
     //computes the weights for each joint based on the time difference between the current timestamp and the timestamp of the joint
     std::vector<std::vector<double>> weights(_positions.size(), std::vector<double>(_positions[0].size(), 0.0));
@@ -179,15 +220,15 @@ public:
     }
 
     // compute the weighted covariance matrices for each joint and camera AND INVERTS THEM!
-    std::vector<std::vector<Eigen::Matrix3d>> weighted_covariances(_covariances.size()); // _covariances[j][i] is the covariance matrix of the j-th joint of the i-th camera times weights
+    std::vector<std::vector<Eigen::Matrix3d>> weighted_covariances_inv(_covariances.size()); // _covariances[j][i] is the covariance matrix of the j-th joint of the i-th camera times weights
     for (size_t joint = 0; joint < _covariances.size(); ++joint) {
-      weighted_covariances[joint].resize(_covariances[joint].size());
+      weighted_covariances_inv[joint].resize(_covariances[joint].size());
       for (size_t cam = 0; cam < _positions[joint].size(); ++cam) {
         if (_covariances[joint][cam].determinant() != 0 ){
-          weighted_covariances[joint][cam] = (_covariances[joint][cam] * weights[joint][cam]).inverse(); // multiply the covariance matrix by the weight and invert it
+          weighted_covariances_inv[joint][cam] = (_covariances[joint][cam]).inverse() * weights[joint][cam]; // multiply the covariance matrix by the weight (inverted for computational efficiency)
         }  else {
           // if the covariance matrix is singular, set it to zero
-          weighted_covariances[joint][cam] = Eigen::Matrix3d::Zero();
+          weighted_covariances_inv[joint][cam] = Eigen::Matrix3d::Zero();
         }
       }
     }
@@ -202,12 +243,12 @@ public:
         if ((_covariances[joint][cam](0,0) <= 0) || (_covariances[joint][cam](1,1) <= 0) || (_covariances[joint][cam](2,2) <= 0)){
            // check if the joint has a valid covariance (no null first element, no negative values)
         }else{
-          _merged_covariances[joint] += weighted_covariances[joint][cam]; // merge the covariances using the inverse
+          _merged_covariances[joint] += weighted_covariances_inv[joint][cam]; // merge the covariances using the inverse
         }
       }
       
       //adds the prior positions weighted by the weights to the merged position
-      _merged_covariances[joint] += predicted_covariances[joint]; // add the current covariance to the merged covariance
+      _merged_covariances[joint] += prior_covariances_inv[joint]; // add the current covariance to the merged covariance
       _merged_covariances[joint] = _merged_covariances[joint].inverse(); // invert the merged covariance matrix
 
       // merge the positions using the weights and the covariances
@@ -216,12 +257,12 @@ public:
         if ((_covariances[joint][cam](0,0) <= 0) || (_covariances[joint][cam](1,1) <= 0) || (_covariances[joint][cam](2,2) <= 0)) {
           // check if the joint has a valid covariance (no null first element, no negative values)
         } else {
-            _merged_positions[joint] += weighted_covariances[joint][cam] * _positions[joint][cam];
+            _merged_positions[joint] += weighted_covariances_inv[joint][cam] * _positions[joint][cam];
             _camera_used[joint] += 1; // increment the camera used for the joint
         }
       }
       
-      _merged_positions[joint] += predicted_covariances[joint] * merged_positions_prev[joint]; // add the current position to the merged position
+      _merged_positions[joint] += prior_covariances_inv[joint] * prior_positions[joint]; // add the current position to the merged position
       _merged_positions[joint] = _merged_covariances[joint] * _merged_positions[joint]; // multiply the merged position by the merged covariance matrix
     }
 
@@ -336,6 +377,10 @@ public:
   };
 
 private:
+
+  // Set if data are received from a dummy source (with "message" field). If dummy, we need to simulate the current timestamp adding a delay to the maximum timestamp received.
+  bool _is_dummy = false;
+
   // Maps the joint names to their indices
   map<string, int> keypoints_map_string2int;
   map<int, string> keypoints_map_int2string;

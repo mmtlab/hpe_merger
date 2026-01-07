@@ -157,12 +157,56 @@
                 <li><a href="#overview">Panoramica del Progetto</a></li>
                 <li><a href="#architecture">Architettura del Sistema</a></li>
                 <li><a href="#dataflow">Flusso dei Dati</a></li>
+                <li><a href="#flowchart">Flowchart Operativo</a></li>
                 <li><a href="#theory">Teoria Matematica Utilizzata</a></li>
                 <li><a href="#load_data">Metodo load_data()</a></li>
                 <li><a href="#process">Metodo process()</a></li>
                 <li><a href="#fixes">Correzioni e Bug Fix</a></li>
                 <li><a href="#conclusions">Conclusioni</a></li>
             </ol>
+        </div>
+
+        <div class="page-break"></div>
+
+        <div class="section" id="flowchart">
+            <h2>4. 🔁 Flowchart Operativo</h2>
+
+            <div class="diagram">
+Start input JSON
+    │
+    ├─► Controllo wrapper "message" e flag dummy
+    │      (usa il payload interno se presente)
+    │
+    ├─► get_camera_index(hostname)
+    │      • nuova camera → resize buffer
+    │      • camera nota → indice esistente
+    │
+    ├─► Validazione campi
+    │      • ts presente?
+    │      • crd len=3 numerici?
+    │      • unc len=6 numerici?
+    │      • joint label mappato?
+    │
+    ├─► Memorizza per joint/camera
+    │      _positions, _covariances, _times
+    │
+    ├─► process()
+    │      • timestamp live o simulato
+    │      • pesi temporali gauss
+    │      • covarianze inverse pesate
+    │      • fusione posizioni
+    │      • velocità e incertezze
+    │
+    └─► Output JSON FSD
+           ts, typ, crd, unc, ncm, agent_id
+            (solo valori validati)
+            </div>
+
+            <p>
+                Il flowchart riflette il comportamento aggiornato: gestione di input incapsulati nel campo <code>"message"</code>,
+                registrazione dinamica delle telecamere, validazione strutturale e numerica di coordinate e covarianze,
+                selezione del timestamp (realtime o simulato per dati dummy) e produzione dell'output fuso <code>typ="FSD"</code>.
+            </p>
         </div>
 
         <div class="page-break"></div>
@@ -297,7 +341,7 @@ Input JSON        load_data()      Storage Interno      process()      Output Fu
         <div class="page-break"></div>
 
         <div class="section" id="theory">
-            <h2>4. 🔬 Teoria Matematica Utilizzata</h2>
+            <h2>5. 🔬 Teoria Matematica Utilizzata</h2>
 
             <h3>4.1 Filtering Bayesiano e Kalman-like Filtering</h3>
             <p>
@@ -395,7 +439,7 @@ if (_merged_covariances[i].determinant() != 0) {
         <div class="page-break"></div>
 
         <div class="section" id="load_data">
-            <h2>5. 📥 Analisi Dettagliata: Metodo load_data()</h2>
+            <h2>6. 📥 Analisi Dettagliata: Metodo load_data()</h2>
 
             <h3>Signature</h3>
             <div class="code-block">
@@ -404,6 +448,13 @@ return_type load_data(json const &input, string topic = "") override
 
             <h3>Passaggi Eseguiti</h3>
             <ol>
+                <li><strong>Unwrap e Modalità Dummy</strong>
+                    <ul>
+                        <li>Se il JSON contiene <code>"message"</code> come oggetto, lo usa come payload reale</li>
+                        <li>Setta <code>_is_dummy=true</code> per indicare dati registrati e gestire il timestamp simulato</li>
+                    </ul>
+                </li>
+
                 <li><strong>Validazione Timestamp</strong>
                     <ul>
                         <li>Controlla se il campo "ts" esiste nel JSON</li>
@@ -425,6 +476,15 @@ return_type load_data(json const &input, string topic = "") override
                         <li>Itera su tutti i campi del JSON input</li>
                         <li>Cerca "crd" (coordinate) e "unc" (uncertainties)</li>
                         <li>Converte stringa-label in indice numerico via map</li>
+                    </ul>
+                </li>
+
+                <li><strong>Validazioni Robuste su crd/unc</strong>
+                    <ul>
+                        <li>crd deve essere array di 3 numeri reali</li>
+                        <li>unc deve essere array di 6 numeri reali</li>
+                        <li>Scarta qualsiasi joint con valori non numerici o dimensioni errate</li>
+                        <li>Ignora etichette non presenti nella mappa joint → nessuna scrittura in buffer</li>
                     </ul>
                 </li>
 
@@ -477,7 +537,7 @@ _times[joint_index][camera_index] = timestamp;
         <div class="page-break"></div>
 
         <div class="section" id="process">
-            <h2>6. ⚙️ Analisi Dettagliata: Metodo process()</h2>
+            <h2>7. ⚙️ Analisi Dettagliata: Metodo process()</h2>
 
             <h3>Panoramica Generale</h3>
             <p>
@@ -487,12 +547,21 @@ _times[joint_index][camera_index] = timestamp;
 
             <h3>Fase 1: Calcolo del Timestamp Corrente</h3>
             <div class="code-block">
-auto now = std::chrono::system_clock::now();
-int64_t timestamp = std::chrono::duration_cast&lt;std::chrono::nanoseconds&gt;
-    (now.time_since_epoch()).count();
+int64_t timestamp;
+if (!_is_dummy) {
+    auto now = std::chrono::system_clock::now();
+    timestamp = std::chrono::duration_cast&lt;std::chrono::nanoseconds&gt;
+        (now.time_since_epoch()).count();
+} else {
+    uint64_t max_time = 0;
+    for (joint, cam) max_time = max(max_time, _times[joint][cam]);
+    timestamp = max_time + 1000000 + (rand() % 29000000); // 1–30 ms
+}
             </div>
             <p>
-                Ottiene il timestamp di sistema corrente in nanosecondi dall'epoch (1 gennaio 1970 UTC).
+                <strong>Live</strong>: usa il tempo di sistema in ns. <br>
+                <strong>Dummy/Replay</strong>: se l'input arriva incapsulato in <code>"message"</code>, trova il massimo timestamp ricevuto,
+                aggiunge un ritardo casuale 1-30 ms (rand) e forza <code>_is_dummy</code> per simulare l'avanzamento temporale.
             </p>
 
             <h3>Fase 2: Calcolo Pesi Temporali e Predizioni</h3>
@@ -513,6 +582,11 @@ int64_t timestamp = std::chrono::duration_cast&lt;std::chrono::nanoseconds&gt;
 
 5. Covarianza pesata:
    Σ_pred_pesata[j] = (Σ_pred[j] × w[j])^(-1)
+            </div>
+
+            <div class="warning">
+                <strong>Nota implementativa:</strong> dopo il calcolo, il codice azzera <code>prior_covariances_inv</code>
+                (riga di debug). In pratica la predizione di covarianza non contribuisce al merge finché non verrà riattivata.
             </div>
 
             <h3>Fase 3: Calcolo Pesi per Dati di Input</h3>
@@ -605,7 +679,7 @@ for (size_t joint = 0; joint < _merged_positions.size(); ++joint) {
         <div class="page-break"></div>
 
         <div class="section" id="fixes">
-            <h2>7. 🔧 Correzioni e Bug Fix Applicati</h2>
+            <h2>8. 🔧 Correzioni e Bug Fix Applicati</h2>
 
             <h3>Bug 1: Overflow Timestamp - CRITICO</h3>
             <table>
@@ -693,7 +767,7 @@ posizioni fuse = invalide ✗       posizioni fuse = corrette ✓
         <div class="page-break"></div>
 
         <div class="section" id="conclusions">
-            <h2>8. 📋 Conclusioni e Raccomandazioni</h2>
+            <h2>9. 📋 Conclusioni e Raccomandazioni</h2>
 
             <h3>Punti Chiave del Sistema</h3>
             <ol>
