@@ -319,14 +319,16 @@ public:
     // (e.g. agent_id, etc.)
     Filter::set_params(params);
 
-    // provide sensible defaults for the parameters by setting e.g.
-    _params["time_weight_normalization"] = 0.5; // default time weight normalization factor in seconds
-    _params["joint_map"] = { "NOS_","NEC_","SHOR","ELBR","WRIR","SHOL","ELBL","WRIL","HIPR","KNER","ANKR","HIPL","KNEL","ANKL","EARR","EARL"}; // default joint map for 
-    
     // then merge the defaults with the actually provided parameters
     // params needs to be cast to json
     _params.merge_patch(*(json *)params);
 
+    // provide sensible defaults for the parameters by setting e.g.
+    if (_params.contains("time_weight_normalization") == false){
+      _params["time_weight_normalization"] = 1.0; // default time weight normalization factor in seconds
+    }
+
+    _params["joint_map"] = { "NOS_","NEC_","SHOR","ELBR","WRIR","SHOL","ELBL","WRIL","HIPR","KNER","ANKR","HIPL","KNEL","ANKL","EARR","EARL"}; // default joint map for HPE
     // creates two maps to faciliate indexing the joints by name and index
     for (size_t i = 0; i < _params["joint_map"].size(); ++i) {
       keypoints_map_string2int[_params["joint_map"][i]] = i;
@@ -343,9 +345,9 @@ public:
     _covariances.resize(num_joints);
     _times.resize(num_joints);
     _velocities.resize(num_joints, Eigen::Vector3d::Zero());
-    _velocities_covariances.resize(num_joints, Eigen::Matrix3d::Zero());
+    _velocities_covariances.resize(num_joints, Eigen::Matrix3d::Identity() * 2500.0);
     _merged_positions.resize(num_joints, Eigen::Vector3d::Zero());
-    _merged_covariances.resize(num_joints, Eigen::Matrix3d::Zero());
+    _merged_covariances.resize(num_joints, Eigen::Matrix3d::Identity() * 2500.0);
     _merged_times.resize(num_joints, 0);
     _camera_used.resize(num_joints, 0);
 
