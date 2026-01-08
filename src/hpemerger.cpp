@@ -177,51 +177,58 @@ public:
     std::vector<Eigen::Matrix3d> merged_covariances_prev(_merged_positions.size()); // please note that this is already weighted and inverted
     std::vector<Eigen::Vector3d> prior_positions(_merged_positions.size()); // this is the PRIOR for the fusion
     std::vector<Eigen::Matrix3d> prior_covariances_inv(_merged_positions.size());
-    std::vector<double> current_weight(_merged_positions.size());
+    std::vector<double> prior_weights(_merged_positions.size());
 
     // get the time weight normalization factor from the parameters
     double time_const = _params["time_weight_normalization"].get<double>();
 
     // Compute the current positions, covariances and weights based on the merged positions, covariances and velocities
     double merged_time_diff;
-    for (size_t i = 0; i < _merged_positions.size(); ++i) {   
-      merged_time_diff = (timestamp - _merged_times[i]) / 1e9; // time difference between the current timestamp and the merged timestamp IN SECONDS
-      current_weight[i] = exp(-((merged_time_diff)*(merged_time_diff)) / (time_const * time_const)); // weight based on the time difference
-      merged_positions_prev[i] = _merged_positions[i]; // stores for the velocity computation at the end
-      prior_positions[i] = merged_positions_prev[i] + _velocities[i]*(merged_time_diff); // assuming _times[i] is in m/ns since the timestamp is in ns
-      if (_merged_covariances[i].determinant() != 0) {
-        merged_covariances_prev[i] = _merged_covariances[i]; // store the previous merged covariance for the velocity computation at the end
-        prior_covariances_inv[i] = merged_covariances_prev[i] + (merged_time_diff * merged_time_diff) * _velocities_covariances[i]; // propagate the covariance based on the velocity and time difference
-        prior_covariances_inv[i] = (prior_covariances_inv[i]).inverse()*current_weight[i]; // update the covariance based on the weight (inverted for computational efficiency)
-      } else {
-        prior_covariances_inv[i] = Eigen::Matrix3d::Zero(); // if the covariance is singular, set it to zero
-      }
-      //DEBUG ONLY: set prior to zero  (unrelevant)
-      prior_covariances_inv[i] = Eigen::Matrix3d::Zero(); 
-    }
 
     //computes the weights for each joint based on the time difference between the current timestamp and the timestamp of the joint
     std::vector<std::vector<double>> weights(_positions.size(), std::vector<double>(_positions[0].size(), 0.0));
     for (size_t joint = 0; joint < _positions.size(); ++joint) {
-      for (size_t cam = 0; cam < _positions[joint].size(); ++cam) {
-        double time_diff = (timestamp - _times[joint][cam]) / 1e9; // time difference between the current timestamp and the joint timestamp IN SECONDS
-        cout << "joint: " << joint << ", cam: " << cam << endl;
-        cout << "timestamp (ns): " << timestamp << endl;
-        cout << "_times[" << joint << "][" << cam << "] (ns): " << _times[joint][cam] << endl;
-        cout << "time_diff (s): " << time_diff << endl;
 
+      // Calculate the prior weight based on the time difference
+      merged_time_diff = (static_cast<int64_t>(timestamp) - static_cast<int64_t>(_merged_times[joint])) / 1e9; // time difference between the current timestamp and the merged timestamp IN SECONDS
+      prior_weights[joint] = exp(-((merged_time_diff)*(merged_time_diff)) / (time_const * time_const)); // weight based on the time difference
+      
+      // Calculate the weights for each camera based on the time difference
+      for (size_t cam = 0; cam < _positions[joint].size(); ++cam) {
+        double time_diff = (static_cast<int64_t>(timestamp) - static_cast<int64_t>(_times[joint][cam])) / 1e9; // time difference between the current timestamp and the joint timestamp IN SECONDS
+        
         // weight is computed as an exponential based on the time difference (e^(-time_diff^2 / tau^2))
         weights[joint][cam] = exp(-((time_diff)*(time_diff)) / (time_const * time_const));  
+
+        cout << "weight: " << weights[joint][cam] << endl << endl;
+      
       }
       
-      //  # NON CREDO SERVA NORMALIZZARE I PESI, MA LO LASCIO QUI PER RIFERIMENTO
-      //normalize the weights for each joint
-      //double sum_weights = std::accumulate(weights[joint].begin(), weights[joint].end(), 0.0);
-      //if (sum_weights > 0) {
-      //  for (size_t cam = 0; cam < _positions[joint].size(); ++cam) {
-      //    weights[joint][cam] /= sum_weights; // normalize the weights
-      //  }
-      //} 
+      //normalize the weights for each joint and the prior weight
+      double sum_weights = std::accumulate(weights[joint].begin(), weights[joint].end(), 0.0);
+      sum_weights += prior_weights[joint]; // add also the prior weight
+      if (sum_weights > 0) {
+        for (size_t cam = 0; cam < _positions[joint].size(); ++cam) {
+          weights[joint][cam] /= sum_weights; // normalize the weights
+          
+          cout << "weight norm: " << weights[joint][cam] << endl << endl;
+        }
+        prior_weights[joint] /= sum_weights; // normalize the prior weight
+      } 
+      
+      // compute the prior positions and covariances with normalized weights
+      merged_positions_prev[joint] = _merged_positions[joint]; // stores for the velocity computation at the end
+      prior_positions[joint] = merged_positions_prev[joint] + _velocities[joint]*(merged_time_diff); // assuming _times[joint] is in m/ns since the timestamp is in ns
+      if (_merged_covariances[joint].determinant() != 0) {
+        merged_covariances_prev[joint] = _merged_covariances[joint]; // store the previous merged covariance for the velocity computation at the end
+        prior_covariances_inv[joint] = merged_covariances_prev[joint] + (merged_time_diff * merged_time_diff) * _velocities_covariances[joint]; // propagate the covariance based on the velocity and time difference
+        prior_covariances_inv[joint] = (prior_covariances_inv[joint]).inverse()*prior_weights[joint]; // update the covariance based on the weight (inverted for computational efficiency)
+      } else {
+        prior_covariances_inv[joint] = Eigen::Matrix3d::Zero(); // if the covariance is singular, set it to zero
+      }
+      //DEBUG ONLY: set prior to zero  (unrelevant)
+      // prior_covariances_inv[joint] = Eigen::Matrix3d::Zero(); 
+
     }
 
     // compute the weighted covariance matrices for each joint and camera AND INVERTS THEM!
@@ -279,7 +286,6 @@ public:
       //cout << "merged_times[" << joint << "] (ns): " << _merged_times[joint] << endl;
 
       double dt = (timestamp - _merged_times[joint]) / 1e9; // time difference between the current timestamp and the merged timestamp IN SECONDS  
-      cout << "dt: " << dt << endl;
       
       _velocities[joint] = (_merged_positions[joint] - merged_positions_prev[joint]) / dt; // compute the velocity as the difference between the current position and the previous position divided by the time difference
       _velocities_covariances[joint] = (1/(dt * dt)) * (_merged_covariances[joint] + merged_covariances_prev[joint]); // compute the velocity covariance as the sum of the merged covariance and the current covariance divided by the time difference
@@ -315,7 +321,7 @@ public:
 
     // provide sensible defaults for the parameters by setting e.g.
     _params["time_weight_normalization"] = 0.5; // default time weight normalization factor in seconds
-    _params["joint_map"] = { "NOS_","NEC_","SHOR","ELBR","WRIR","SHOL","ELBL","WRIL","HIPR","KNER","ANKR","HIPL","KNEL","ANKL","EYER","EYEL","EARR","EARL"}; // default joint map for 
+    _params["joint_map"] = { "NOS_","NEC_","SHOR","ELBR","WRIR","SHOL","ELBL","WRIL","HIPR","KNER","ANKR","HIPL","KNEL","ANKL","EARR","EARL"}; // default joint map for 
     
     // then merge the defaults with the actually provided parameters
     // params needs to be cast to json
