@@ -70,7 +70,7 @@ public:
     int camera_index = get_camera_index(data_to_process["hostname"]);
     // TODO: controllare che l'agent_id sia trasmesso nel json input!!
 
-    cout << "HPE Merger - Receiving data from camera: " << data_to_process["hostname"] << " with index: " << camera_index << endl;
+    //cout << "HPE Merger - Receiving data from camera: " << data_to_process["hostname"] << " with index: " << camera_index << endl;
 
     // retrieve the skeleton data just received and update the covariance matrix and joint positions
     for(const auto &[label, data] : data_to_process.items()) {
@@ -179,11 +179,13 @@ public:
     std::vector<Eigen::Matrix3d> prior_covariances_inv(_merged_positions.size());
     std::vector<double> current_weight(_merged_positions.size());
 
+    // get the time weight normalization factor from the parameters
+    double time_const = _params["time_weight_normalization"].get<double>();
+
     // Compute the current positions, covariances and weights based on the merged positions, covariances and velocities
-    int64_t merged_time_diff;
+    double merged_time_diff;
     for (size_t i = 0; i < _merged_positions.size(); ++i) {   
-      merged_time_diff = timestamp - _merged_times[i]; // time difference between the current timestamp and the merged timestamp
-      double time_const = _params["time_weight_normalization"].get<double>();
+      merged_time_diff = (timestamp - _merged_times[i]) / 1e9; // time difference between the current timestamp and the merged timestamp IN SECONDS
       current_weight[i] = exp(-((merged_time_diff)*(merged_time_diff)) / (time_const * time_const)); // weight based on the time difference
       merged_positions_prev[i] = _merged_positions[i]; // stores for the velocity computation at the end
       prior_positions[i] = merged_positions_prev[i] + _velocities[i]*(merged_time_diff); // assuming _times[i] is in m/ns since the timestamp is in ns
@@ -200,10 +202,13 @@ public:
 
     //computes the weights for each joint based on the time difference between the current timestamp and the timestamp of the joint
     std::vector<std::vector<double>> weights(_positions.size(), std::vector<double>(_positions[0].size(), 0.0));
-    double time_const = _params["time_weight_normalization"].get<double>();
     for (size_t joint = 0; joint < _positions.size(); ++joint) {
       for (size_t cam = 0; cam < _positions[joint].size(); ++cam) {
-        int64_t time_diff = timestamp - _times[joint][cam];
+        double time_diff = (timestamp - _times[joint][cam]) / 1e9; // time difference between the current timestamp and the joint timestamp IN SECONDS
+        cout << "joint: " << joint << ", cam: " << cam << endl;
+        cout << "timestamp (ns): " << timestamp << endl;
+        cout << "_times[" << joint << "][" << cam << "] (ns): " << _times[joint][cam] << endl;
+        cout << "time_diff (s): " << time_diff << endl;
 
         // weight is computed as an exponential based on the time difference (e^(-time_diff^2 / tau^2))
         weights[joint][cam] = exp(-((time_diff)*(time_diff)) / (time_const * time_const));  
@@ -273,8 +278,8 @@ public:
       //cout << "timestamp (ns): " << timestamp << endl;
       //cout << "merged_times[" << joint << "] (ns): " << _merged_times[joint] << endl;
 
-      int64_t dt = timestamp - _merged_times[joint]; // time difference between the current timestamp and the merged timestamp
-      //cout << "dt: " << dt << endl;
+      double dt = (timestamp - _merged_times[joint]) / 1e9; // time difference between the current timestamp and the merged timestamp IN SECONDS  
+      cout << "dt: " << dt << endl;
       
       _velocities[joint] = (_merged_positions[joint] - merged_positions_prev[joint]) / dt; // compute the velocity as the difference between the current position and the previous position divided by the time difference
       _velocities_covariances[joint] = (1/(dt * dt)) * (_merged_covariances[joint] + merged_covariances_prev[joint]); // compute the velocity covariance as the sum of the merged covariance and the current covariance divided by the time difference
@@ -309,7 +314,7 @@ public:
     Filter::set_params(params);
 
     // provide sensible defaults for the parameters by setting e.g.
-    _params["time_weight_normalization"] = 500000000; // default time weight normalization factor in nanoseconds
+    _params["time_weight_normalization"] = 0.5; // default time weight normalization factor in seconds
     _params["joint_map"] = { "NOS_","NEC_","SHOR","ELBR","WRIR","SHOL","ELBL","WRIL","HIPR","KNER","ANKR","HIPL","KNEL","ANKL","EYER","EYEL","EARR","EARL"}; // default joint map for 
     
     // then merge the defaults with the actually provided parameters
