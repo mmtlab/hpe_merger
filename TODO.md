@@ -1,1 +1,0 @@
-- cambiare nome alle covarianze invertite
