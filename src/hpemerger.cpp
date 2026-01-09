@@ -53,6 +53,9 @@ public:
 
     uint64_t timestamp = 0;
 
+    if (data_to_process.contains("typ") && data_to_process["typ"] == "FSD") {
+      return return_type::error; // ignore fusion data
+    }
     // store the global timestamp of the input data
     if (data_to_process.contains("ts")) {
       timestamp = data_to_process["ts"]; // get the timestamp in nanoseconds
@@ -300,7 +303,7 @@ public:
       _params["time_weight_normalization"] = 1.0; // default time weight normalization factor in seconds
     }
 
-    _params["joint_map"] = { "NOS_","NEC_","SHOR","ELBR","WRIR","SHOL","ELBL","WRIL","HIPR","KNER","ANKR","HIPL","KNEL","ANKL","EARR","EARL"}; // default joint map for HPE
+    _params["joint_map"] = { "NOS_","NEC_","SHOR","ELBR","WRIR","SHOL","ELBL","WRIL","HIPR","KNER","ANKR","HIPL","KNEL","ANKL","EYEL","EYER","EARR","EARL"}; // default joint map for HPE
     // creates two maps to faciliate indexing the joints by name and index
     for (size_t i = 0; i < _params["joint_map"].size(); ++i) {
       keypoints_map_string2int[_params["joint_map"][i]] = i;
