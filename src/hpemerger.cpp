@@ -43,8 +43,6 @@ public:
 
   // Implement the actual functionality here
   return_type load_data(json const &input, string topic = "") override {
-    
-    //cout << "Input JSON received by HPE Merger: " << input.dump(2) << endl;
 
     // Check if input has a "message" field and use it as the actual data
     json data_to_process = input;
@@ -68,9 +66,6 @@ public:
 
     // gets the camera index if previously set otherwise adds it to the list of cameras and returns the index
     int camera_index = get_camera_index(data_to_process["hostname"]);
-    // TODO: controllare che l'agent_id sia trasmesso nel json input!!
-
-    //cout << "HPE Merger - Receiving data from camera: " << data_to_process["hostname"] << " with index: " << camera_index << endl;
 
     // retrieve the skeleton data just received and update the covariance matrix and joint positions
     for(const auto &[label, data] : data_to_process.items()) {
@@ -126,17 +121,6 @@ public:
       }  
     }
 
-    /*
-    int joint_idx = 10; // for testing, we print only the first joint
-    cout << endl << "Camera index: " << camera_index << ", Timestamp: " << timestamp << " ns" << endl;
-
-    cout << _positions[joint_idx][camera_index](0) << ", " << _positions[joint_idx][camera_index](1) << ", " << _positions[joint_idx][camera_index](2) << endl << endl;
-    
-    cout << _covariances[joint_idx][camera_index](0) << ", " << _covariances[joint_idx][camera_index](1) << ", " << _covariances[joint_idx][camera_index](2) << endl;
-    cout << _covariances[joint_idx][camera_index](3) << ", " << _covariances[joint_idx][camera_index](4) << ", " << _covariances[joint_idx][camera_index](5) << endl;
-    cout << _covariances[joint_idx][camera_index](6) << ", " << _covariances[joint_idx][camera_index](7) << ", " << _covariances[joint_idx][camera_index](8) << endl << endl;
-    */
-
     return return_type::success;
   }
 
@@ -168,8 +152,6 @@ public:
       timestamp = max_time + 1000000 + (rand() % 29000000);
     }
 
-    //cout << "Timestamp NOW: " << timestamp << endl;
-
     // load the data as necessary and set the fields of the json out variable
 
     // predict the current positions of the joints based on the previous positions and velocities
@@ -199,8 +181,6 @@ public:
         
         // weight is computed as an exponential based on the time difference (e^(-time_diff^2 / tau^2))
         weights[joint][cam] = exp(-((time_diff)*(time_diff)) / (time_const * time_const));  
-
-        cout << "weight: " << weights[joint][cam] << endl << endl;
       
       }
       
@@ -210,8 +190,6 @@ public:
       if (sum_weights > 0) {
         for (size_t cam = 0; cam < _positions[joint].size(); ++cam) {
           weights[joint][cam] /= sum_weights; // normalize the weights
-          
-          cout << "weight norm: " << weights[joint][cam] << endl << endl;
         }
         prior_weights[joint] /= sum_weights; // normalize the prior weight
       } 
@@ -280,10 +258,6 @@ public:
 
     //computes the joint velocities based on the previous positions and the current positions for the next iteration
     for (size_t joint = 0; joint < _positions.size(); ++joint) {
-      
-      //cout << "joint: " << joint << endl;
-      //cout << "timestamp (ns): " << timestamp << endl;
-      //cout << "merged_times[" << joint << "] (ns): " << _merged_times[joint] << endl;
 
       double dt = (timestamp - _merged_times[joint]) / 1e9; // time difference between the current timestamp and the merged timestamp IN SECONDS  
       
@@ -305,8 +279,6 @@ public:
       out[joint_name]["unc"] = { _merged_covariances[joint](0,0), _merged_covariances[joint](1,1), _merged_covariances[joint](2,2),
                             _merged_covariances[joint](0,1), _merged_covariances[joint](0,2), _merged_covariances[joint](1,2) };
     }
-    
-    // cout << "HPE merged:" << out.dump(2) << endl; // print the output data to the console for debugging
    
     // This sets the agent_id field in the output json object, only when it is
     // not empty
