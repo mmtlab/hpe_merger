@@ -107,6 +107,7 @@ plugin.load_data(input_json);
 plugin.process(output_json);
 ```
 
+TO UPDATE: launch the plugin with --dont-block and -p50 to avoid waiting for new data on the sub_topic while running the process every 50 ms (20 Hz)
 ### 4. **Output Data Format**
 
 The output JSON contains the fused results for each joint:
