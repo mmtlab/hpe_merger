@@ -75,8 +75,14 @@ public:
     // gets the camera index if previously set otherwise adds it to the list of cameras and returns the index
     int camera_index = get_camera_index(data_to_process["hostname"]);
 
+    // Check if input has a "message" field and use it as the actual data
+    json data_joints = input;
+    if (input.contains("joints") && input["joints"].is_object()) {
+      data_joints = input["joints"];
+    }
+
     // retrieve the skeleton data just received and update the covariance matrix and joint positions
-    for(const auto &[label, data] : data_to_process.items()) {
+    for(const auto &[label, data] : data_joints.items()) {
       if(data.contains("crd") && data.contains("unc")){
         
         // Validate that crd and unc are arrays with correct size
@@ -303,17 +309,17 @@ public:
 
     for (size_t joint = 0; joint < _merged_positions.size(); ++joint) {
       string joint_name = keypoints_map_int2string[joint]; // get the joint name from the map
-      out[joint_name]["ncm"] = _camera_used[joint]; 
-      out[joint_name]["crd"] = { _merged_positions[joint](0), _merged_positions[joint](1), _merged_positions[joint](2) };
-      out[joint_name]["unc"] = { _merged_covariances[joint](0,0), _merged_covariances[joint](1,1), _merged_covariances[joint](2,2),
+      out["joints"][joint_name]["ncm"] = _camera_used[joint]; 
+      out["joints"][joint_name]["crd"] = { _merged_positions[joint](0), _merged_positions[joint](1), _merged_positions[joint](2) };
+      out["joints"][joint_name]["unc"] = { _merged_covariances[joint](0,0), _merged_covariances[joint](1,1), _merged_covariances[joint](2,2),
                             _merged_covariances[joint](0,1), _merged_covariances[joint](0,2), _merged_covariances[joint](1,2) };
       /*
       // Debug
-      out[joint_name]["prior_crd"] = { prior_positions[joint](0), prior_positions[joint](1), prior_positions[joint](2) };
-      out[joint_name]["prior_unc_inv"] = { prior_covariances_inv[joint](0,0), prior_covariances_inv[joint](1,1), prior_covariances_inv[joint](2,2),
+      out["joints"][joint_name]["prior_crd"] = { prior_positions[joint](0), prior_positions[joint](1), prior_positions[joint](2) };
+      out["joints"][joint_name]["prior_unc_inv"] = { prior_covariances_inv[joint](0,0), prior_covariances_inv[joint](1,1), prior_covariances_inv[joint](2,2),
                             prior_covariances_inv[joint](0,1), prior_covariances_inv[joint](0,2), prior_covariances_inv[joint](1,2) };
       auto prior_covariances = prior_covariances_inv[joint].inverse();
-      out[joint_name]["prior_unc"] = { prior_covariances(0,0), prior_covariances(1,1), prior_covariances(2,2),
+      out["joints"][joint_name]["prior_unc"] = { prior_covariances(0,0), prior_covariances(1,1), prior_covariances(2,2),
                             prior_covariances(0,1), prior_covariances(0,2), prior_covariances(1,2) };
                             */
     }
