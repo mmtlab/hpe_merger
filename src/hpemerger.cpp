@@ -359,7 +359,7 @@ public:
   }
 
 
-  // fuses positions based on their covariance matrices and weights, with a discrepance limit to discard outliers
+  /* fuses positions based on their covariance matrices and weights, with a discrepance limit to discard outliers
   int fuse_positions(
     const std::vector<std::vector<Eigen::Vector3d>> positions, // positions[j][i] is the position (x,y,z) in mm of the j-th joint of the i-th camera
     const std::vector<std::vector<Eigen::Matrix3d>> covariances,  // covariances[j][i] is the covariance matrix in mm² of the j-th joint of the i-th camera
@@ -402,7 +402,7 @@ public:
       } 
 
     return 0; // placeholder
-  }
+  }*/
 
 
   // gets the camera index if previously set otherwise adds it to the list of cameras and returns the index (resizes the internal vectors to accommodate the new camera)
