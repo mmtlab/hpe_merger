@@ -331,7 +331,7 @@ public:
     std::vector<std::vector<double>> weights, // weights[j][i] is the weight of the j-th joint of the i-th camera
     std::vector<Eigen::Vector3d> &fused_positions, // output fused position in mm of each j-th joint
     std::vector<Eigen::Matrix3d> &fused_covariances, // output fused covariance in mm² of each j-th joint
-    double discrepance_limit = 3000.0 // in mm
+    double discrepance_limit = 300000.0 // in mm
   ) {
     // implement the fusion of positions based on their covariance matrices and weights
     // return 0 if successful, -1 if no valid positions were provided
@@ -340,7 +340,7 @@ public:
       for (size_t joint = 0; joint < positions.size(); ++joint) {
 
         //excludes positions that are too far from the left-out average position
-        if(positions[0].size()>0){
+        if(positions[0].size()>1){ //only if more than one position is available
           //compute the left-out average position for the joint
           std::vector<Eigen::Vector3d> leftout_positions;
           for (size_t cam = 0; cam < positions[joint].size(); ++cam) {
@@ -373,6 +373,8 @@ public:
         }
         for (size_t cam = 0; cam < _positions[joint].size(); ++cam) {
           weights[joint][cam] /= sum_weights; // normalize the weights
+          //DEBUG ONLY
+          // weights[joint][cam] = 1;
         }
          
         // adds the weighted covariance matrices for each joint and camera AND INVERTS THEM!
@@ -384,9 +386,14 @@ public:
           weighted_covariances_inv[cam] = (covariances[joint][cam]).inverse() * weights[joint][cam]; // information matrix scaled by weight: lower weight = less contribution to fusion
           fused_j_covariance += weighted_covariances_inv[cam]; // merge the covariances using the inverse
           fused_j_position +=  weighted_covariances_inv[cam] * positions[joint][cam];
+          if(joint == 7){ //DEBUG ONLY
+            cout << "J" << joint << "C" << cam << ": weight " << weights[joint][cam] << " cov: " << endl << covariances[joint][cam](0,0) << "|" << covariances[joint][cam](1,1) << "|" << covariances[joint][cam](2,2) << endl;
+          }
         }
         fused_j_covariance = fused_j_covariance.inverse(); // revert the merged covariance matrix
         fused_j_position = fused_j_covariance * fused_j_position; // multiply the merged position by the merged covariance matrix (to normalize the positions' weights)
+        
+        cout << "FUSED: weight " << sum_weights << " cov: " << endl << fused_j_covariance(0,0) << "|" << fused_j_covariance(1,1) << "|" << fused_j_covariance(2,2) << endl;
 
         // update the output fused positions and covariances
         fused_positions[joint] = fused_j_position;
@@ -430,7 +437,7 @@ public:
   map<string, string> info() override { 
     // return a map of stringswith additional information about the plugin
     // it is used to print the information about the plugin when it is loaded
-    // by the agent
+    // by the agentFC
     return {}; 
   };
 
