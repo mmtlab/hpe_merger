@@ -191,89 +191,61 @@ public:
     std::vector<Eigen::Vector3d> merged_positions_prev(_merged_positions.size());
     std::vector<Eigen::Matrix3d> merged_covariances_prev(_merged_positions.size()); // covariance matrices at previous time step
     std::vector<Eigen::Vector3d> prior_positions(_merged_positions.size()); // this is the PRIOR for the fusion
-    std::vector<Eigen::Matrix3d> weighted_prior_covariances_inv(_merged_positions.size());
+    std::vector<Eigen::Matrix3d> prior_covariances(_merged_positions.size());
     std::vector<double> prior_weights(_merged_positions.size(), 0.0); // weights for the prior positions (is the prior_weight divided by the normalization for each joint)
-    double prior_weight=0.0; // weight for the prior position (just one!)
-
+    
     // get the time weight normalization factor from the parameters
     double time_const = _params["time_weight_normalization"].get<double>();
     // Calculate the prior weight based on the time difference
+    double prior_weight=0.0; // weight for the prior position (just one!)  NOTE: we compute the prior ALWAYS even if not used for fusion later (weight=0)
     if (_params["enable_prior"].get<bool>() == true) {
       prior_weight = exp(-((dt)*(dt)) / (time_const * time_const)); // weight based on the time difference
     }
 
-    //computes the weights for each joint based on the time difference between the current timestamp and the timestamp of the joint
-    std::vector<std::vector<double>> weights(_positions.size(), std::vector<double>(_positions[0].size(), 0.0));
+    //prepares the arrays for the fusion merge
+    std::vector<std::vector<Eigen::Vector3d>> positions=_positions; // _positions[j][i] is the position (x,y,z) in mm of the j-th joint of the i-th camera
+    std::vector<std::vector<Eigen::Matrix3d>> covariances=_covariances;  // _covariances[j][i] is the covariance matrix in mm² of the j-th joint of the i-th camera
+    std::vector<std::vector<double>> weights(positions.size(), std::vector<double>(positions[0].size(), 0.0));
 
+    // Calculate the weights for each camera based on the time difference (e^(-time_diff^2 / tau^2))
     for (size_t joint = 0; joint < _positions.size(); ++joint) {
-
-      // Calculate the weights for each camera based on the time difference
       for (size_t cam = 0; cam < _positions[joint].size(); ++cam) {
         double time_diff = (static_cast<int64_t>(timestamp) - static_cast<int64_t>(_times[joint][cam])) * 1e-9; // time difference between the current timestamp and the joint timestamp IN SECONDS
-        
-        // weight is computed as an exponential based on the time difference (e^(-time_diff^2 / tau^2))
         weights[joint][cam] = exp(-((time_diff)*(time_diff)) / (time_const * time_const));  
-
-        // DEBUG ONLY
-        //weights[joint][cam] = 1;
       }
-      
-      
-      //normalize the weights for each joint and the prior weight
-      double sum_weights = std::accumulate(weights[joint].begin(), weights[joint].end(), 0.0);
-      sum_weights += prior_weight; // add also the prior weight
+    }       
 
-      if (sum_weights > 0) {
-        for (size_t cam = 0; cam < _positions[joint].size(); ++cam) {
-          weights[joint][cam] /= sum_weights; // normalize the weights
-        }
-        prior_weights[joint] = prior_weight / sum_weights; // normalize the prior weight
-      } 
-
-      // compute the prior positions and covariances with normalized weights
+    // compute the prior positions and covariances for each joint based on THE PREVIOUS merged positions and velocities (stored in _merged_positions and _velocities)
+    for (size_t joint = 0; joint < _positions.size(); ++joint) {
       merged_positions_prev[joint] = _merged_positions[joint]; // stores for the velocity computation at the end
+      merged_covariances_prev[joint] = _merged_covariances[joint]; // store the previous merged covariance for the velocity computation at the end
       prior_positions[joint] = merged_positions_prev[joint] + _velocities[joint]*(dt); // positions in mm, velocity in mm/s, merged_time_diff in s
       if (_merged_covariances[joint].determinant() != 0) {
-        merged_covariances_prev[joint] = _merged_covariances[joint]; // store the previous merged covariance for the velocity computation at the end
-        weighted_prior_covariances_inv[joint] = merged_covariances_prev[joint] + (dt * dt) * _velocities_covariances[joint]; // propagate the covariance based on the velocity and time difference
-        weighted_prior_covariances_inv[joint] = (weighted_prior_covariances_inv[joint]).inverse() * prior_weights[joint]; // information matrix scaled by weight: lower weight = less contribution to fusion
+          prior_covariances[joint] = merged_covariances_prev[joint] + (dt * dt) * _velocities_covariances[joint]; // propagate the covariance based on the velocity and time difference
+          prior_weights[joint] = prior_weight; // set the prior weight for the joint
       } else {
         //DEBUG ONLY should never happen
         cout << "Joint " << joint << " merged covariance null " << endl;
-        weighted_prior_covariances_inv[joint] = Eigen::Matrix3d::Zero(); // if the covariance is singular, set it to zero
+        prior_weights[joint] = 0; // if the covariance is singular, set it to zero
       }
     }
 
-    // compute the weighted covariance matrices for each joint and camera AND INVERTS THEM!
-    std::vector<std::vector<Eigen::Matrix3d>> weighted_covariances_inv(_covariances.size()); // _covariances[j][i] is the covariance matrix of the j-th joint of the i-th camera times weights
-    for (size_t joint = 0; joint < _covariances.size(); ++joint) {
-      weighted_covariances_inv[joint].resize(_covariances[joint].size());
-      for (size_t cam = 0; cam < _positions[joint].size(); ++cam) {
-        weighted_covariances_inv[joint][cam] = (_covariances[joint][cam]).inverse() * weights[joint][cam]; // information matrix scaled by weight: lower weight = less contribution to fusion
-      }
-    }
-    
-    //compute the merged positions and covariances for each joint from the weighted covariances and the positions
-    for (size_t joint = 0; joint < _positions.size(); ++joint) {
-      _merged_positions[joint] = Eigen::Vector3d::Zero();  // PLEASE NOTE: it's a COLUMN vector
-      _merged_covariances[joint] = Eigen::Matrix3d::Zero();
-      _camera_used[joint] = 0; // reset the camera used for the joint
-
-      for (size_t cam = 0; cam < _positions[joint].size(); ++cam) {
-        _merged_covariances[joint] += weighted_covariances_inv[joint][cam]; // merge the covariances using the inverse
-        _merged_positions[joint] +=  weighted_covariances_inv[joint][cam] * _positions[joint][cam];
-        _camera_used[joint] += 1; // increment the camera used for the joint
-      }
-      //adds the prior positions weighted by the weights to the merged position
-      _merged_covariances[joint] += weighted_prior_covariances_inv[joint]; // add the current covariance to the merged covariance
-      _merged_covariances[joint] = _merged_covariances[joint].inverse(); // revert the merged covariance matrix
-
-      _merged_positions[joint] += weighted_prior_covariances_inv[joint] * prior_positions[joint]; // add the current position to the merged position
-      _merged_positions[joint] = _merged_covariances[joint] * _merged_positions[joint]; // multiply the merged position by the merged covariance matrix (to normalize the positions' weights)
+    //adds the prior to the arrays for the fusion merge
+    for (size_t joint = 0; joint < positions.size(); ++joint) {
+      positions[joint].push_back(prior_positions[joint]);
+      covariances[joint].push_back(prior_covariances[joint]);
+      weights[joint].push_back(prior_weights[joint]);
     }
 
+    int valid_ok = fuse_positions(positions, covariances, weights, _merged_positions, _merged_covariances); //use the internal method to fuse the positions
+
+    if(valid_ok != 0){
+      // if the fusion failed for some reason, return an error
+      cout << "Fusion of positions failed due to zero weights data." << endl;
+      return return_type::retry;
+    }
     //computes the joint velocities based on the previous positions and the current positions for the next iteration
-    for (size_t joint = 0; joint < _positions.size(); ++joint) {
+    for (size_t joint = 0; joint < _merged_positions.size(); ++joint) {
       _velocities[joint] = (_merged_positions[joint] - merged_positions_prev[joint]) / dt; // compute the velocity as the difference between the current position and the previous position divided by the time difference
       _velocities_covariances[joint] = (1/(dt * dt)) * (_merged_covariances[joint] + merged_covariances_prev[joint]); // compute the velocity covariance as the sum of the merged covariance and the current covariance divided by the time difference
     }
@@ -294,19 +266,12 @@ public:
       
       // Debug
       out["joints"][joint_name]["prior_crd"] = { prior_positions[joint](0), prior_positions[joint](1), prior_positions[joint](2) };
-      out["joints"][joint_name]["prior_unc_inv"] = { weighted_prior_covariances_inv[joint](0,0), weighted_prior_covariances_inv[joint](1,1), weighted_prior_covariances_inv[joint](2,2),
-                                                     weighted_prior_covariances_inv[joint](0,1), weighted_prior_covariances_inv[joint](0,2), weighted_prior_covariances_inv[joint](1,2) };
-      auto prior_covariances = weighted_prior_covariances_inv[joint].inverse();
-      out["joints"][joint_name]["prior_unc"] = { prior_covariances(0,0), prior_covariances(1,1), prior_covariances(2,2),
-                            prior_covariances(0,1), prior_covariances(0,2), prior_covariances(1,2) };
-                                  
-      // DEBUG ONLY
-      // out["joints"][joint_name]["crd"] = { prior_positions[joint](0), prior_positions[joint](1), prior_positions[joint](2) };
-      // out["joints"][joint_name]["unc_inv"] = { weighted_prior_covariances_inv[joint](0,0), weighted_prior_covariances_inv[joint](1,1), weighted_prior_covariances_inv[joint](2,2),
+      //out["joints"][joint_name]["prior_unc_inv"] = { weighted_prior_covariances_inv[joint](0,0), weighted_prior_covariances_inv[joint](1,1), weighted_prior_covariances_inv[joint](2,2),
       //                                               weighted_prior_covariances_inv[joint](0,1), weighted_prior_covariances_inv[joint](0,2), weighted_prior_covariances_inv[joint](1,2) };
-      // out["joints"][joint_name]["unc"] = { prior_covariances(0,0), prior_covariances(1,1), prior_covariances(2,2),
-      //                      prior_covariances(0,1), prior_covariances(0,2), prior_covariances(1,2) };
-                            
+      //auto prior_covariances = weighted_prior_covariances_inv[joint].inverse();
+      out["joints"][joint_name]["prior_unc"] = { prior_covariances[joint](0,0), prior_covariances[joint](1,1), prior_covariances[joint](2,2),
+                            prior_covariances[joint](0,1), prior_covariances[joint](0,2), prior_covariances[joint](1,2) };
+                     
     }
    
     // This sets the agent_id field in the output json object, only when it is
@@ -363,7 +328,7 @@ public:
   int fuse_positions(
     const std::vector<std::vector<Eigen::Vector3d>> positions, // positions[j][i] is the position (x,y,z) in mm of the j-th joint of the i-th camera
     const std::vector<std::vector<Eigen::Matrix3d>> covariances,  // covariances[j][i] is the covariance matrix in mm² of the j-th joint of the i-th camera
-    const std::vector<std::vector<double>> weights, // weights[j][i] is the weight of the j-th joint of the i-th camera
+    std::vector<std::vector<double>> weights, // weights[j][i] is the weight of the j-th joint of the i-th camera
     std::vector<Eigen::Vector3d> &fused_positions, // output fused position in mm of each j-th joint
     std::vector<Eigen::Matrix3d> &fused_covariances, // output fused covariance in mm² of each j-th joint
     double discrepance_limit = 300.0 // in mm
@@ -376,7 +341,7 @@ public:
 
         //normalize the weights for each joint and the prior weight
         double sum_weights = std::accumulate(weights[joint].begin(), weights[joint].end(), 0.0);
-        if (sum_weights <=> 0) {
+        if (sum_weights <= 0) {
           return -1; // no valid positions provided
         }
         for (size_t cam = 0; cam < _positions[joint].size(); ++cam) {
