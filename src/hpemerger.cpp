@@ -371,7 +371,7 @@ public:
         if (sum_weights <= 0) {
           return -1; // no valid positions provided
         }
-        for (size_t cam = 0; cam < _positions[joint].size(); ++cam) {
+        for (size_t cam = 0; cam < positions[joint].size(); ++cam) {
           weights[joint][cam] /= sum_weights; // normalize the weights
           //DEBUG ONLY
           // weights[joint][cam] = 1;
