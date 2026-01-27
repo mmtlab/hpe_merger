@@ -147,7 +147,7 @@ public:
           //DEBUG ONLY
           //_covariances[joint_index][camera_index]= Eigen::Matrix3d::Identity()*100; // set a fixed covariance for testing
         }
-        
+
       }  
     }
 
@@ -211,10 +211,6 @@ public:
       for (size_t cam = 0; cam < _positions[joint].size(); ++cam) {
         double time_diff = (static_cast<int64_t>(timestamp) - static_cast<int64_t>(_times[joint][cam])) * 1e-9; // time difference between the current timestamp and the joint timestamp IN SECONDS
         
-        // debug only
-        //if (joint == 0) {
-        //  cout << " Cam" << cam << ": " << timestamp << " - " << _times[joint][cam] << " = " << time_diff << " s " << endl;
-        //}
         // weight is computed as an exponential based on the time difference (e^(-time_diff^2 / tau^2))
         weights[joint][cam] = exp(-((time_diff)*(time_diff)) / (time_const * time_const));  
 
@@ -225,10 +221,6 @@ public:
       
       //normalize the weights for each joint and the prior weight
       double sum_weights = std::accumulate(weights[joint].begin(), weights[joint].end(), 0.0);
-
-      //debug only
-      // cout << "Joint " << joint << " weight 1 " << weights[joint][0] << " sum of weights " << sum_weights << " + " << prior_weight << " = " << sum_weights + prior_weight << endl;
-
       sum_weights += prior_weight; // add also the prior weight
 
       if (sum_weights > 0) {
@@ -246,7 +238,7 @@ public:
         weighted_prior_covariances_inv[joint] = merged_covariances_prev[joint] + (dt * dt) * _velocities_covariances[joint]; // propagate the covariance based on the velocity and time difference
         weighted_prior_covariances_inv[joint] = (weighted_prior_covariances_inv[joint]).inverse() * prior_weights[joint]; // information matrix scaled by weight: lower weight = less contribution to fusion
       } else {
-        //DEBUG ONLY
+        //DEBUG ONLY should never happen
         cout << "Joint " << joint << " merged covariance null " << endl;
         weighted_prior_covariances_inv[joint] = Eigen::Matrix3d::Zero(); // if the covariance is singular, set it to zero
       }
@@ -257,14 +249,7 @@ public:
     for (size_t joint = 0; joint < _covariances.size(); ++joint) {
       weighted_covariances_inv[joint].resize(_covariances[joint].size());
       for (size_t cam = 0; cam < _positions[joint].size(); ++cam) {
-        if (_covariances[joint][cam].determinant() != 0 ){
-          weighted_covariances_inv[joint][cam] = (_covariances[joint][cam]).inverse() * weights[joint][cam]; // information matrix scaled by weight: lower weight = less contribution to fusion
-        }  else {
-          // if the covariance matrix is singular, set it to zero
-          //DEBUG ONLY
-          cout << "Joint " << joint << " cam " << cam << " covariance null " << endl;
-          weighted_covariances_inv[joint][cam] = Eigen::Matrix3d::Zero();
-        }
+        weighted_covariances_inv[joint][cam] = (_covariances[joint][cam]).inverse() * weights[joint][cam]; // information matrix scaled by weight: lower weight = less contribution to fusion
       }
     }
     
@@ -275,13 +260,9 @@ public:
       _camera_used[joint] = 0; // reset the camera used for the joint
 
       for (size_t cam = 0; cam < _positions[joint].size(); ++cam) {
-        if ((_covariances[joint][cam](0,0) <= 0) || (_covariances[joint][cam](1,1) <= 0) || (_covariances[joint][cam](2,2) <= 0)){
-           // check if the joint has a valid covariance (no null first element, no negative values)
-        }else{
-          _merged_covariances[joint] += weighted_covariances_inv[joint][cam]; // merge the covariances using the inverse
-          _merged_positions[joint] +=  weighted_covariances_inv[joint][cam] * _positions[joint][cam];
-          _camera_used[joint] += 1; // increment the camera used for the joint
-        }
+        _merged_covariances[joint] += weighted_covariances_inv[joint][cam]; // merge the covariances using the inverse
+        _merged_positions[joint] +=  weighted_covariances_inv[joint][cam] * _positions[joint][cam];
+        _camera_used[joint] += 1; // increment the camera used for the joint
       }
       //adds the prior positions weighted by the weights to the merged position
       _merged_covariances[joint] += weighted_prior_covariances_inv[joint]; // add the current covariance to the merged covariance
@@ -300,7 +281,6 @@ public:
     //update the last merge time
     _last_merge_time = timestamp;
 
-    //TODO: Pubblicare i dati della fusione ed aggiornare le posizioni, le velocità e covarianze dei giunti della fusione
     // Fill the output json object with the merged positions and covariances
     out["ts"] = timestamp; // set the timestamp of the output data
     out["typ"] = "FSD"; // set the type of the output data to fusion
@@ -319,6 +299,13 @@ public:
       auto prior_covariances = weighted_prior_covariances_inv[joint].inverse();
       out["joints"][joint_name]["prior_unc"] = { prior_covariances(0,0), prior_covariances(1,1), prior_covariances(2,2),
                             prior_covariances(0,1), prior_covariances(0,2), prior_covariances(1,2) };
+                                  
+      // DEBUG ONLY
+      // out["joints"][joint_name]["crd"] = { prior_positions[joint](0), prior_positions[joint](1), prior_positions[joint](2) };
+      // out["joints"][joint_name]["unc_inv"] = { weighted_prior_covariances_inv[joint](0,0), weighted_prior_covariances_inv[joint](1,1), weighted_prior_covariances_inv[joint](2,2),
+      //                                               weighted_prior_covariances_inv[joint](0,1), weighted_prior_covariances_inv[joint](0,2), weighted_prior_covariances_inv[joint](1,2) };
+      // out["joints"][joint_name]["unc"] = { prior_covariances(0,0), prior_covariances(1,1), prior_covariances(2,2),
+      //                      prior_covariances(0,1), prior_covariances(0,2), prior_covariances(1,2) };
                             
     }
    
@@ -365,11 +352,58 @@ public:
     _velocities.resize(num_joints, Eigen::Vector3d::Zero());
     _velocities_covariances.resize(num_joints, Eigen::Matrix3d::Identity() * 2500.0); // initial uncertainty: 2500 mm²/s² (~50 mm/s std dev)
     _merged_positions.resize(num_joints, Eigen::Vector3d::Zero());
-    _merged_covariances.resize(num_joints, Eigen::Matrix3d::Identity() * 2500.0); // initial uncertainty: 2500 mm² (~50 mm std dev)
+    _merged_covariances.resize(num_joints, Eigen::Matrix3d::Identity() * 250000.0); // initial uncertainty: 250000 mm² (~500 mm std dev)
     _last_merge_time=0; //time of the last merge computation (same for all joints)
     _camera_used.resize(num_joints, 0);
 
   }
+
+
+  // fuses positions based on their covariance matrices and weights, with a discrepance limit to discard outliers
+  int fuse_positions(
+    const std::vector<std::vector<Eigen::Vector3d>> positions, // positions[j][i] is the position (x,y,z) in mm of the j-th joint of the i-th camera
+    const std::vector<std::vector<Eigen::Matrix3d>> covariances,  // covariances[j][i] is the covariance matrix in mm² of the j-th joint of the i-th camera
+    const std::vector<std::vector<double>> weights, // weights[j][i] is the weight of the j-th joint of the i-th camera
+    std::vector<Eigen::Vector3d> &fused_positions, // output fused position in mm of each j-th joint
+    std::vector<Eigen::Matrix3d> &fused_covariances, // output fused covariance in mm² of each j-th joint
+    double discrepance_limit = 300.0 // in mm
+  ) {
+    // implement the fusion of positions based on their covariance matrices and weights
+    // return 0 if successful, -1 if no valid positions were provided
+
+      //cycles through the joints
+      for (size_t joint = 0; joint < positions.size(); ++joint) {
+
+        //normalize the weights for each joint and the prior weight
+        double sum_weights = std::accumulate(weights[joint].begin(), weights[joint].end(), 0.0);
+        if (sum_weights <=> 0) {
+          return -1; // no valid positions provided
+        }
+        for (size_t cam = 0; cam < _positions[joint].size(); ++cam) {
+          weights[joint][cam] /= sum_weights; // normalize the weights
+        }
+         
+        // adds the weighted covariance matrices for each joint and camera AND INVERTS THEM!
+        Eigen::Vector3d fused_j_position = Eigen::Vector3d::Zero();
+        Eigen::Matrix3d fused_j_covariance = Eigen::Matrix3d::Zero();
+        std::vector<Eigen::Matrix3d> weighted_covariances_inv(covariances[joint].size()); 
+
+        for (size_t cam = 0; cam < positions[joint].size(); ++cam) {
+          weighted_covariances_inv[cam] = (covariances[joint][cam]).inverse() * weights[joint][cam]; // information matrix scaled by weight: lower weight = less contribution to fusion
+          fused_j_covariance += weighted_covariances_inv[cam]; // merge the covariances using the inverse
+          fused_j_position +=  weighted_covariances_inv[cam] * positions[joint][cam];
+        }
+        fused_j_covariance = fused_j_covariance.inverse(); // revert the merged covariance matrix
+        fused_j_position = fused_j_covariance * fused_j_position; // multiply the merged position by the merged covariance matrix (to normalize the positions' weights)
+
+        // update the output fused positions and covariances
+        fused_positions[joint] = fused_j_position;
+        fused_covariances[joint] = fused_j_covariance;
+      } 
+
+    return 0; // placeholder
+  }
+
 
   // gets the camera index if previously set otherwise adds it to the list of cameras and returns the index (resizes the internal vectors to accommodate the new camera)
   int get_camera_index(string const &camera_name) {
@@ -388,8 +422,9 @@ public:
         _covariances[joint][index] = Eigen::Matrix3d::Identity()*250000.0; // initialize the covariance matrix to a big identity matrix (250000 mm² ~ 500 mm std dev)
         _times[joint][index] = 0; // initialize the time to zero
 
-        cout << "Added new camera: " << camera_name << " with index " << index << endl;
-        cout << "Resized internal vectors for joint " << joint << " to size " << _positions[joint].size() << endl;
+        // DEBUG ONLY
+        // cout << "Added new camera: " << camera_name << " with index " << index << endl;
+        // cout << "Resized internal vectors for joint " << joint << " to size " << _positions[joint].size() << endl;
       }
 
       return index;
