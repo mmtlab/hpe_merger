@@ -331,13 +331,40 @@ public:
     std::vector<std::vector<double>> weights, // weights[j][i] is the weight of the j-th joint of the i-th camera
     std::vector<Eigen::Vector3d> &fused_positions, // output fused position in mm of each j-th joint
     std::vector<Eigen::Matrix3d> &fused_covariances, // output fused covariance in mm² of each j-th joint
-    double discrepance_limit = 300.0 // in mm
+    double discrepance_limit = 3000.0 // in mm
   ) {
     // implement the fusion of positions based on their covariance matrices and weights
     // return 0 if successful, -1 if no valid positions were provided
 
       //cycles through the joints
       for (size_t joint = 0; joint < positions.size(); ++joint) {
+
+        //excludes positions that are too far from the left-out average position
+        if(positions[0].size()>0){
+          //compute the left-out average position for the joint
+          std::vector<Eigen::Vector3d> leftout_positions;
+          for (size_t cam = 0; cam < positions[joint].size(); ++cam) {
+            //left out the cam-th position
+            Eigen::Vector3d leftout_avg = Eigen::Vector3d::Zero();
+            for (size_t cam2 = 0; cam2 < positions[joint].size(); ++cam2) {
+              if (cam2 != cam) {
+                leftout_avg += positions[joint][cam2]/(positions[joint].size() - 1);
+              }
+            }
+            leftout_positions.push_back(leftout_avg);
+          }
+
+          //now excludes the positions that are too far from the left-out average position
+          for (size_t cam = 0; cam < positions[joint].size(); ++cam) {
+            double distance = (positions[joint][cam] - leftout_positions[cam]).norm();
+            if (distance > discrepance_limit) {
+              // exclude this position by setting its weight to zero
+              weights[joint][cam] = 0.0;
+            }else{
+              weights[joint][cam] *= (1.0 - (distance / discrepance_limit)*(distance / discrepance_limit)); // decrease the weight based on the distance
+            }
+          }
+        }
 
         //normalize the weights for each joint and the prior weight
         double sum_weights = std::accumulate(weights[joint].begin(), weights[joint].end(), 0.0);
