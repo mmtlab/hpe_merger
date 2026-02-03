@@ -25,6 +25,8 @@
 #include <vector>
 #include <array>
 #include <Eigen/Dense>
+#include <algorithm>
+#include <ctime>
 
 
 // Define the name of the plugin
@@ -51,24 +53,24 @@ public:
     // load data from input json object but if the UNCERTAINTY is missing or invalid, skip the joint, do not update its position and covariance
     // if the covariance matrix is null, its determinat is null or the diagonal elements are negative, skip the joint
 
+    
+    auto time_start_load_data = std::chrono::high_resolution_clock::now();
+
     // Check if input has a "message" field and use it as the actual data
     json data_to_process = input;
     if (input.contains("message") && input["message"].is_object()) {
       data_to_process = input["message"];
-      _is_dummy = true; 
     }
 
-    uint64_t timestamp = 0;
+    int64_t timestamp = 0;
 
     if (data_to_process.contains("typ") && data_to_process["typ"] == "FSD") {
       return return_type::retry; // ignore fusion data
     }
-    // store the global timestamp of the input data
-    if (data_to_process.contains("ts")) {
-      timestamp = data_to_process["ts"]; // get the timestamp in nanoseconds
-    } else {
-      // if the timestamp is not present in "ts" field, return an error (SHOULD we use the "timestamp" field instead??)
-      _error = "Input data does not contain a timestamp in the 'ts' field.";
+    // store the global timestamp of the input data (selected by _params["time"])
+    string time_field = _params.value("time", "ts");
+    if (!read_timestamp_ns(data_to_process, time_field, timestamp)) {
+      _error = "Input data does not contain a valid timestamp for the selected field: " + time_field;
       return return_type::retry;
     }
 
@@ -135,13 +137,19 @@ public:
         if ((covariance_matrix(0,0) <= 0) || (covariance_matrix(1,1) <= 0) || (covariance_matrix(2,2) <= 0) || (covariance_matrix.determinant() == 0)) {
           // check if the joint has a valid covariance (no null first element, no negative values)
           //DEBUG ONLY
-          cout << "Joint " << joint_index << " cam " << camera_index << " covariance invalid " << endl;
+          //cout << "Joint " << joint_index << " cam " << camera_index << " covariance invalid " << endl;
           continue;
         } else {
 
           // updates the internal storage of positions and covariances for the joint and camera (should not do if anything is invalid)
           _positions[joint_index][camera_index] = Eigen::Vector3d(data["crd"][0], data["crd"][1], data["crd"][2]);
           _covariances[joint_index][camera_index] = covariance_matrix;
+
+          if (joint_index == 0){
+            cout << endl << "HpemergerPlugin: Loaded data for camera " << camera_index << " joint " << joint_index << " at timestamp " << timestamp << endl;
+            cout << "_times[" << joint_index << "][" << camera_index << "] = " << _times[joint_index][camera_index] << endl;
+          }
+
           _times[joint_index][camera_index] = timestamp; // store the timestamp of the joint
 
           //DEBUG ONLY
@@ -151,6 +159,11 @@ public:
       }  
     }
 
+    
+    auto time_now = std::chrono::high_resolution_clock::now();
+    auto duration_load_data = std::chrono::duration_cast<std::chrono::milliseconds>(time_now - time_start_load_data);
+    std::cout << "\033[33m" << "HpemergerPlugin: Load data duration: " << duration_load_data.count() << " ms" << "\033[0m" << std::endl;
+
     return return_type::success;
   }
 
@@ -158,32 +171,17 @@ public:
   // into the output json object
   return_type process(json &out) override {
     out.clear();
+
+    auto time_start_process = std::chrono::high_resolution_clock::now();
     
-    int64_t timestamp;
-    if (!_is_dummy) {
-      // Current timestamp in nanoseconds
-      // For LIVE processing, use system time:
-      auto now = std::chrono::system_clock::now();
-      timestamp = std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count();
-    }
-    else {
-      // For RECORDED data processing, use the maximum timestamp from the data:
-      // Find the maximum timestamp in _times across all joints and cameras
-      uint64_t max_time = 0;
-      for (size_t joint = 0; joint < _times.size(); ++joint) {
-        for (size_t cam = 0; cam < _times[joint].size(); ++cam) {
-          if (_times[joint][cam] > max_time) {
-            max_time = _times[joint][cam];
-          }
-        }
-      }
-      
-      // Add a random delay between 1 and 30 ms (in nanoseconds) to simulate processing
-      timestamp = max_time + 1000000 + (rand() % 29000000);
-    }
+    // Current timestamp in nanoseconds (aligned with _params["time"] format)
+    int64_t timestamp = get_now_timestamp_ns();
+    
 
     //since we always compute the merge at this point, the time step is computed only once
     double dt = (timestamp - _last_merge_time) * 1e-9; // time difference between the current timestamp and the merged timestamp IN SECONDS 
+
+    std::cout << std::endl << "HpemergerPlugin: Merging at timestamp " << timestamp << " with dt " << dt << " s" << std::endl;
 
     // load the data as necessary and set the fields of the json out variable
 
@@ -195,11 +193,11 @@ public:
     std::vector<double> prior_weights(_merged_positions.size(), 0.0); // weights for the prior positions (is the prior_weight divided by the normalization for each joint)
     
     // get the time weight normalization factor from the parameters
-    double time_const = _params["time_weight_normalization"].get<double>();
+    double time_const = _params.value("time_weight_normalization", 0.5); // in seconds
     // Calculate the prior weight based on the time difference
-    double prior_weight=0.0; // weight for the prior position (just one!)  NOTE: we compute the prior ALWAYS even if not used for fusion later (weight=0)
-    if (_params["enable_prior"].get<bool>() == true) {
-      prior_weight = exp(-((dt)*(dt)) / (time_const * time_const)); // weight based on the time difference
+    double prior_weight = 0.0; // weight for the prior position (just one!)  NOTE: we compute the prior ALWAYS even if not used for fusion later (weight=0)
+    if (_params.value("enable_prior", false)) {
+      prior_weight = exp(-(dt * dt) / (time_const * time_const)); // weight based on the time difference
     }
 
     //prepares the arrays for the fusion merge
@@ -210,8 +208,15 @@ public:
     // Calculate the weights for each camera based on the time difference (e^(-time_diff^2 / tau^2))
     for (size_t joint = 0; joint < _positions.size(); ++joint) {
       for (size_t cam = 0; cam < _positions[joint].size(); ++cam) {
-        double time_diff = (static_cast<int64_t>(timestamp) - static_cast<int64_t>(_times[joint][cam])) * 1e-9; // time difference between the current timestamp and the joint timestamp IN SECONDS
-        weights[joint][cam] = exp(-((time_diff)*(time_diff)) / (time_const * time_const));  
+        
+        double time_diff = (timestamp - _times[joint][cam]) * 1e-9; // time difference between the current timestamp and the joint timestamp IN SECONDS
+        weights[joint][cam] = exp(-(time_diff * time_diff) / (time_const * time_const)); 
+        
+        if (joint == 0){
+          cout << endl << "Cam " << cam << " Joint " << joint << " timestamp: " << timestamp << endl;
+          cout << "Cam " << cam << " Joint " << joint << " _times: " << _times[joint][cam] << endl;
+          cout << "Cam " << cam << " Joint " << joint << " time_diff: " << time_diff << " s" << endl;
+        }
       }
     }       
 
@@ -225,7 +230,7 @@ public:
           prior_weights[joint] = prior_weight; // set the prior weight for the joint
       } else {
         //DEBUG ONLY should never happen
-        cout << "Joint " << joint << " merged covariance null " << endl;
+        //cout << "Joint " << joint << " merged covariance null " << endl;
         prior_weights[joint] = 0; // if the covariance is singular, set it to zero
       }
     }
@@ -241,7 +246,7 @@ public:
 
     if(valid_ok != 0){
       // if the fusion failed for some reason, return an error
-      cout << "Fusion of positions failed due to zero weights data." << endl;
+      //cout << "Fusion of positions failed due to zero weights data." << endl;
       return return_type::retry;
     }
     //computes the joint velocities based on the previous positions and the current positions for the next iteration
@@ -274,20 +279,24 @@ public:
                      
     }
    
+    auto time_now = std::chrono::high_resolution_clock::now();
+    auto duration_process = std::chrono::duration_cast<std::chrono::milliseconds>(time_now - time_start_process);
+    std::cout << "\033[32m" << "HpemergerPlugin: Process duration: " << duration_process.count() << " ms" << "\033[0m" << std::endl;
+
     // This sets the agent_id field in the output json object, only when it is
     // not empty
     if (!_agent_id.empty()) out["agent_id"] = _agent_id;
     return return_type::success;
   }
   
-  void set_params(void const *params) override {
+  void set_params(const json &params) override {
     // Call the parent class method to set the common parameters 
     // (e.g. agent_id, etc.)
     Filter::set_params(params);
 
     // then merge the defaults with the actually provided parameters
     // params needs to be cast to json
-    _params.merge_patch(*(json *)params);
+    _params.merge_patch(params);
 
     // provide sensible defaults for the parameters by setting e.g.
     if (_params.contains("time_weight_normalization") == false){
@@ -296,6 +305,10 @@ public:
 
     if (_params.contains("enable_prior") == false){
       _params["enable_prior"] = false; // default enable prior
+    }
+
+    if (_params.contains("time") == false){
+      _params["time"] = "ts"; // default time field ("ts", "timestamp", "timecode")
     }
 
     _params["joint_map"] = { "NOS_","NEC_","SHOR","ELBR","WRIR","SHOL","ELBL","WRIL","HIPR","KNER","ANKR","HIPL","KNEL","ANKL","EYEL","EYER","EARR","EARL"}; // default joint map for HPE
@@ -386,14 +399,14 @@ public:
           weighted_covariances_inv[cam] = (covariances[joint][cam]).inverse() * weights[joint][cam]; // information matrix scaled by weight: lower weight = less contribution to fusion
           fused_j_covariance += weighted_covariances_inv[cam]; // merge the covariances using the inverse
           fused_j_position +=  weighted_covariances_inv[cam] * positions[joint][cam];
-          if(joint == 7){ //DEBUG ONLY
-            cout << "J" << joint << "C" << cam << ": weight " << weights[joint][cam] << " cov: " << endl << covariances[joint][cam](0,0) << "|" << covariances[joint][cam](1,1) << "|" << covariances[joint][cam](2,2) << endl;
-          }
+          //if(joint == 7){ //DEBUG ONLY
+          //cout << "J" << joint << "C" << cam << ": weight " << weights[joint][cam] << " cov: " << endl << covariances[joint][cam](0,0) << "|" << covariances[joint][cam](1,1) << "|" << covariances[joint][cam](2,2) << endl;
+          //}
         }
         fused_j_covariance = fused_j_covariance.inverse(); // revert the merged covariance matrix
         fused_j_position = fused_j_covariance * fused_j_position; // multiply the merged position by the merged covariance matrix (to normalize the positions' weights)
         
-        cout << "FUSED: weight " << sum_weights << " cov: " << endl << fused_j_covariance(0,0) << "|" << fused_j_covariance(1,1) << "|" << fused_j_covariance(2,2) << endl;
+        //cout << "FUSED: weight " << sum_weights << " cov: " << endl << fused_j_covariance(0,0) << "|" << fused_j_covariance(1,1) << "|" << fused_j_covariance(2,2) << endl;
 
         // update the output fused positions and covariances
         fused_positions[joint] = fused_j_position;
@@ -443,9 +456,6 @@ public:
 
 private:
 
-  // Set if data are received from a dummy source (with "message" field). If dummy, we need to simulate the current timestamp adding a delay to the maximum timestamp received.
-  bool _is_dummy = false;
-
   // Maps the joint names to their indices
   map<string, int> keypoints_map_string2int;
   map<int, string> keypoints_map_int2string;
@@ -459,16 +469,173 @@ private:
   // Units: positions in mm, covariances in mm², velocities in mm/s, velocity covariances in mm²/s², times in ns
   std::vector<std::vector<Eigen::Vector3d>> _positions; // _positions[j][i] is the position (x,y,z) in mm of the j-th joint of the i-th camera
   std::vector<std::vector<Eigen::Matrix3d>> _covariances;  // _covariances[j][i] is the covariance matrix in mm² of the j-th joint of the i-th camera
-  std::vector<std::vector<uint64_t>> _times; // _times[j][i] is the timestamp in ns of the j-th joint of the i-th camera
+  std::vector<std::vector<int64_t>> _times; // _times[j][i] is the timestamp in ns of the j-th joint of the i-th camera
   std::vector<Eigen::Vector3d> _velocities; // _velocities[j] is the velocity in mm/s of the j-th joint
   std::vector<Eigen::Matrix3d> _velocities_covariances; // _velocities_covariances[j] is the velocity covariance in mm²/s² of the j-th joint
   std::vector<Eigen::Vector3d> _merged_positions; // _merged_positions[j] is the merged position in mm of the j-th joint
   std::vector<Eigen::Matrix3d> _merged_covariances; // _merged_covariances[j] is the merged covariance in mm² of the j-th joint
-  uint64_t _last_merge_time; // time of the last merge computation (same for all joints)
+  int64_t _last_merge_time; // time of the last merge computation (same for all joints)
   std::vector<int> _camera_used; // is the number of camera used to merge the j-th joint 
 
   //lists the cameras that are transimitting data
   map<string, int> _cameras; // maps the camera name to its index  if previosly set
+
+  bool read_timestamp_ns(const json &data_to_process, const string &time_field, int64_t &timestamp_ns) const {
+    if (time_field == "timecode") {
+      if (!data_to_process.contains("timecode")) {
+        return false;
+      }
+      if (data_to_process["timecode"].is_number_integer()) {
+        timestamp_ns = static_cast<int64_t>(data_to_process["timecode"]) * 1000000LL;
+        return true;
+      }
+      if (data_to_process["timecode"].is_number()) {
+        timestamp_ns = static_cast<int64_t>(data_to_process["timecode"].get<double>() * 1000000.0);
+        return true;
+      }
+      if (data_to_process["timecode"].is_string()) {
+        try {
+          timestamp_ns = stoll(data_to_process["timecode"].get<string>()) * 1000000LL;
+          return true;
+        } catch (...) {
+          return false;
+        }
+      }
+      return false;
+    }
+
+    if (time_field == "timestamp") {
+      if (!data_to_process.contains("timestamp")) {
+        return false;
+      }
+      if (data_to_process["timestamp"].is_string()) {
+        return parse_timestamp_to_ns(data_to_process["timestamp"].get<string>(), timestamp_ns);
+      }
+      if (data_to_process["timestamp"].is_object() && data_to_process["timestamp"].contains("$date") && data_to_process["timestamp"]["$date"].is_string()) {
+        return parse_timestamp_to_ns(data_to_process["timestamp"]["$date"].get<string>(), timestamp_ns);
+      }
+      return false;
+    }
+
+    // default: "ts" in nanoseconds
+    if (!data_to_process.contains("ts")) {
+      return false;
+    }
+    if (data_to_process["ts"].is_number_integer()) {
+      timestamp_ns = static_cast<int64_t>(data_to_process["ts"]);
+      return true;
+    }
+    if (data_to_process["ts"].is_number()) {
+      timestamp_ns = static_cast<int64_t>(data_to_process["ts"].get<double>());
+      return true;
+    }
+    if (data_to_process["ts"].is_string()) {
+      try {
+        timestamp_ns = stoll(data_to_process["ts"].get<string>());
+        return true;
+      } catch (...) {
+        return false;
+      }
+    }
+    return false;
+  }
+
+  int64_t get_now_timestamp_ns() const {
+    string time_field = _params.value("time", "ts");
+    auto now = std::chrono::system_clock::now();
+    if (time_field == "timecode") {
+      int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+      return now_ms * 1000000LL; // convert ms to ns
+    }
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count();
+  }
+
+  bool parse_timestamp_to_ns(const string &timestamp_str, int64_t &timestamp_ns) const {
+    if (timestamp_str.size() < 19) {
+      return false;
+    }
+
+    auto safe_stoi = [](const string &s, size_t pos, size_t len, int &out) -> bool {
+      try {
+        out = stoi(s.substr(pos, len));
+        return true;
+      } catch (...) {
+        return false;
+      }
+    };
+
+    int year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0;
+    if (!safe_stoi(timestamp_str, 0, 4, year) ||
+        !safe_stoi(timestamp_str, 5, 2, month) ||
+        !safe_stoi(timestamp_str, 8, 2, day) ||
+        !safe_stoi(timestamp_str, 11, 2, hour) ||
+        !safe_stoi(timestamp_str, 14, 2, minute) ||
+        !safe_stoi(timestamp_str, 17, 2, second)) {
+      return false;
+    }
+
+    size_t tz_pos = string::npos;
+    int tz_offset_minutes = 0;
+    if (!timestamp_str.empty() && timestamp_str.back() == 'Z') {
+      tz_pos = timestamp_str.size() - 1;
+      tz_offset_minutes = 0;
+    } else {
+      size_t plus_pos = timestamp_str.find_last_of('+');
+      size_t minus_pos = timestamp_str.find_last_of('-');
+      tz_pos = max(plus_pos, minus_pos);
+      if (tz_pos != string::npos && tz_pos > 18) {
+        int tz_hour = 0, tz_min = 0;
+        if (!safe_stoi(timestamp_str, tz_pos + 1, 2, tz_hour) ||
+            !safe_stoi(timestamp_str, tz_pos + 3, 2, tz_min)) {
+          return false;
+        }
+        int sign = (timestamp_str[tz_pos] == '-') ? -1 : 1;
+        tz_offset_minutes = sign * (tz_hour * 60 + tz_min);
+      } else {
+        tz_pos = string::npos;
+        tz_offset_minutes = 0;
+      }
+    }
+
+    size_t end_pos = (tz_pos == string::npos) ? timestamp_str.size() : tz_pos;
+    int millisecond = 0;
+    size_t frac_pos = timestamp_str.find('.', 19);
+    if (frac_pos != string::npos && frac_pos < end_pos) {
+      string frac = timestamp_str.substr(frac_pos + 1, end_pos - (frac_pos + 1));
+      if (frac.size() > 3) {
+        frac = frac.substr(0, 3);
+      }
+      while (frac.size() < 3) {
+        frac.push_back('0');
+      }
+      try {
+        millisecond = stoi(frac);
+      } catch (...) {
+        return false;
+      }
+    }
+
+    std::tm tm_time = {};
+    tm_time.tm_year = year - 1900;
+    tm_time.tm_mon = month - 1;
+    tm_time.tm_mday = day;
+    tm_time.tm_hour = hour;
+    tm_time.tm_min = minute;
+    tm_time.tm_sec = second;
+
+#ifdef _WIN32
+    time_t utc_seconds = _mkgmtime(&tm_time);
+#else
+    time_t utc_seconds = timegm(&tm_time);
+#endif
+    if (utc_seconds == static_cast<time_t>(-1)) {
+      return false;
+    }
+
+    utc_seconds -= tz_offset_minutes * 60;
+    timestamp_ns = static_cast<int64_t>(utc_seconds) * 1000000000LL + static_cast<int64_t>(millisecond) * 1000000LL;
+    return true;
+  }
 };
 
 
@@ -503,7 +670,7 @@ int main(int argc, char const *argv[])
   params["test"] = "value";
 
   // Set the parameters
-  plugin.set_params(&params);
+  plugin.set_params(params);
 
   // Set input data
   input["data"] = {
