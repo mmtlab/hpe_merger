@@ -136,8 +136,6 @@ public:
         // check if the covariance matrix is valid so we don't need to do it later
         if ((covariance_matrix(0,0) <= 0) || (covariance_matrix(1,1) <= 0) || (covariance_matrix(2,2) <= 0) || (covariance_matrix.determinant() == 0)) {
           // check if the joint has a valid covariance (no null first element, no negative values)
-          //DEBUG ONLY
-          //cout << "Joint " << joint_index << " cam " << camera_index << " covariance invalid " << endl;
           continue;
         } else {
 
@@ -145,24 +143,38 @@ public:
           _positions[joint_index][camera_index] = Eigen::Vector3d(data["crd"][0], data["crd"][1], data["crd"][2]);
           _covariances[joint_index][camera_index] = covariance_matrix;
 
-          if (joint_index == 0){
-            cout << endl << "HpemergerPlugin: Loaded data for camera " << camera_index << " joint " << joint_index << " at timestamp " << timestamp << endl;
-            cout << "_times[" << joint_index << "][" << camera_index << "] = " << _times[joint_index][camera_index] << endl;
-          }
-
           _times[joint_index][camera_index] = timestamp; // store the timestamp of the joint
 
+          if (_params["debug"] == true && joint_index == 0){
+            cout << endl << "\033[33m"  << "_times[" << joint_index << "][" << camera_index << "] = " << _times[joint_index][camera_index] << "\033[0m" << endl;
+          }
           //DEBUG ONLY
           //_covariances[joint_index][camera_index]= Eigen::Matrix3d::Identity()*100; // set a fixed covariance for testing
         }
 
       }  
     }
-
     
+    // Log the load data duration
     auto time_now = std::chrono::high_resolution_clock::now();
     auto duration_load_data = std::chrono::duration_cast<std::chrono::milliseconds>(time_now - time_start_load_data);
-    std::cout << "\033[33m" << "HpemergerPlugin: Load data duration: " << duration_load_data.count() << " ms" << "\033[0m" << std::endl;
+
+    if (_params["debug"] == true){
+      std::cout << "\033[33m" << "Load data duration: " << duration_load_data.count() << " ms" << "\033[0m" << std::endl;
+    }
+
+    // implement a simple rate limiter based on a time window to avoid processing data too frequently
+    if (_window_start_time_ns == 0) {
+      _window_start_time_ns = time_start_load_data.time_since_epoch().count();
+    }
+
+    const int64_t window_ns = 100000000LL; // 100 ms in ns
+    if ((time_start_load_data.time_since_epoch().count() - _window_start_time_ns) < window_ns) {
+      return return_type::retry;
+    }
+
+    _window_start_time_ns = time_start_load_data.time_since_epoch().count();
+    
 
     return return_type::success;
   }
@@ -176,12 +188,9 @@ public:
     
     // Current timestamp in nanoseconds (aligned with _params["time"] format)
     int64_t timestamp = get_now_timestamp_ns();
-    
 
     //since we always compute the merge at this point, the time step is computed only once
     double dt = (timestamp - _last_merge_time) * 1e-9; // time difference between the current timestamp and the merged timestamp IN SECONDS 
-
-    std::cout << std::endl << "HpemergerPlugin: Merging at timestamp " << timestamp << " with dt " << dt << " s" << std::endl;
 
     // load the data as necessary and set the fields of the json out variable
 
@@ -212,10 +221,9 @@ public:
         double time_diff = (timestamp - _times[joint][cam]) * 1e-9; // time difference between the current timestamp and the joint timestamp IN SECONDS
         weights[joint][cam] = exp(-(time_diff * time_diff) / (time_const * time_const)); 
         
-        if (joint == 0){
-          cout << endl << "Cam " << cam << " Joint " << joint << " timestamp: " << timestamp << endl;
-          cout << "Cam " << cam << " Joint " << joint << " _times: " << _times[joint][cam] << endl;
-          cout << "Cam " << cam << " Joint " << joint << " time_diff: " << time_diff << " s" << endl;
+        if (_params["debug"] == true && joint == 0){
+          cout << endl << "\033[32m"  << "_times[" << joint << "][" << cam << "] = " << _times[joint][cam] << "\033[0m"  << endl;
+          cout << "\033[31m"  << "time_diff[" << joint << "][" << cam << "] = " << time_diff << "\033[0m"  << endl;
         }
       }
     }       
@@ -279,13 +287,18 @@ public:
                      
     }
    
+    
+    // Log the process duration
     auto time_now = std::chrono::high_resolution_clock::now();
     auto duration_process = std::chrono::duration_cast<std::chrono::milliseconds>(time_now - time_start_process);
-    std::cout << "\033[32m" << "HpemergerPlugin: Process duration: " << duration_process.count() << " ms" << "\033[0m" << std::endl;
+    if (_params["debug"] == true){
+      std::cout << "\033[32m" << "Process duration: " << duration_process.count() << " ms" << "\033[0m" << std::endl;
+    }
 
     // This sets the agent_id field in the output json object, only when it is
     // not empty
     if (!_agent_id.empty()) out["agent_id"] = _agent_id;
+
     return return_type::success;
   }
   
@@ -311,6 +324,8 @@ public:
       _params["time"] = "ts"; // default time field ("ts", "timestamp", "timecode")
     }
 
+    _params["debug"] = _params.value("debug", false); // default debug flag
+
     _params["joint_map"] = { "NOS_","NEC_","SHOR","ELBR","WRIR","SHOL","ELBL","WRIL","HIPR","KNER","ANKR","HIPL","KNEL","ANKL","EYEL","EYER","EARR","EARL"}; // default joint map for HPE
     // creates two maps to faciliate indexing the joints by name and index
     for (size_t i = 0; i < _params["joint_map"].size(); ++i) {
@@ -332,6 +347,7 @@ public:
     _merged_positions.resize(num_joints, Eigen::Vector3d::Zero());
     _merged_covariances.resize(num_joints, Eigen::Matrix3d::Identity() * 250000.0); // initial uncertainty: 250000 mm² (~500 mm std dev)
     _last_merge_time=0; //time of the last merge computation (same for all joints)
+    _window_start_time_ns = 0; // start of the load window
     _camera_used.resize(num_joints, 0);
 
   }
@@ -352,6 +368,7 @@ public:
       //cycles through the joints
       for (size_t joint = 0; joint < positions.size(); ++joint) {
 
+        /*
         //excludes positions that are too far from the left-out average position
         if(positions[0].size()>1){ //only if more than one position is available
           //compute the left-out average position for the joint
@@ -367,6 +384,7 @@ public:
             leftout_positions.push_back(leftout_avg);
           }
 
+          
           //now excludes the positions that are too far from the left-out average position
           for (size_t cam = 0; cam < positions[joint].size(); ++cam) {
             double distance = (positions[joint][cam] - leftout_positions[cam]).norm();
@@ -378,6 +396,7 @@ public:
             }
           }
         }
+        */
 
         //normalize the weights for each joint and the prior weight
         double sum_weights = std::accumulate(weights[joint].begin(), weights[joint].end(), 0.0);
@@ -475,6 +494,7 @@ private:
   std::vector<Eigen::Vector3d> _merged_positions; // _merged_positions[j] is the merged position in mm of the j-th joint
   std::vector<Eigen::Matrix3d> _merged_covariances; // _merged_covariances[j] is the merged covariance in mm² of the j-th joint
   int64_t _last_merge_time; // time of the last merge computation (same for all joints)
+  int64_t _window_start_time_ns; // load_data window start time in ns
   std::vector<int> _camera_used; // is the number of camera used to merge the j-th joint 
 
   //lists the cameras that are transimitting data
